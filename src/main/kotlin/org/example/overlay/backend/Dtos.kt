@@ -51,3 +51,17 @@ data class ToolCallResult(
         const val STATUS_SUCCESS = "SUCCESS"
     }
 }
+
+/**
+ * Событие для `POST /voice/events` (§3.3). Сокет с Inworld держит оверлей, поэтому реплики
+ * игрока и ответы модели сервер видит только отсюда — без них в его журнале остаются одни
+ * вызовы инструментов.
+ */
+data class VoiceEventDto(
+    val type: String,
+    val speaker: String? = null,
+    val text: String? = null,
+    val final: Boolean = true,
+    val name: String? = null,
+    val status: String? = null,
+)

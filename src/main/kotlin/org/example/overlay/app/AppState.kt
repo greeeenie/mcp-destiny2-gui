@@ -126,8 +126,14 @@ class AppState(
     /** Состояние движка держим отдельно: статус HUD собирается из него и из состояния клавиши. */
     private val _conversationState = MutableStateFlow<ConversationState>(ConversationState.Idle)
 
+    /** Ход разговора уезжает в журнал сервера: без этого там видны только вызовы инструментов. */
+    private val eventReporter = VoiceEventReporter(scope) { batch ->
+        _session.value?.token?.let { backend.sendVoiceEvents(it, batch) }
+    }
+
     init {
         restoreSession()
+        eventReporter.start()
         scope.launch {
             combine(_conversationState, voice.activation, voice.enabled, ::resolveStatus)
                 .collect { _status.value = it }
@@ -162,6 +168,7 @@ class AppState(
     }
 
     private suspend fun onConversationEvent(event: ConversationEvent) {
+        eventReporter.report(event)
         when (event) {
             is ConversationEvent.StateChanged -> {
                 _conversationState.value = event.state

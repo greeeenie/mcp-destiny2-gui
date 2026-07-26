@@ -25,6 +25,7 @@ dependencies {
     implementation(libs.jackson.databind)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.markdown)
+    implementation(libs.jsoup)
     implementation(libs.jna)
     implementation(libs.jna.platform)
     implementation(libs.slf4j.api)

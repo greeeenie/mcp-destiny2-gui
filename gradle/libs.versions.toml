@@ -8,6 +8,8 @@ jackson = "3.2.1"
 jna = "5.19.1"
 # Парсер Markdown из IntelliJ: GFM с таблицами. Рисуем сами, отсюда берём только разбор.
 markdown = "0.7.7"
+# Разбор HTML: модель может ответить и разметкой HTML, а битую вёрстку jsoup чинит сам.
+jsoup = "1.22.2"
 slf4j = "2.0.18"
 logback = "1.5.38"
 junit = "5.14.0"
@@ -20,6 +22,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 jackson-databind = { module = "tools.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-module-kotlin = { module = "tools.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
 markdown = { module = "org.jetbrains:markdown", version.ref = "markdown" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }

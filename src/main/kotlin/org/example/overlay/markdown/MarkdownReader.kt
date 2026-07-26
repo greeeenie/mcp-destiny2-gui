@@ -27,7 +27,13 @@ object MarkdownReader {
         return blocks(tree.children, source)
     }
 
-    private fun blocks(nodes: List<ASTNode>, src: String): List<MdBlock> = nodes.mapNotNull { block(it, src) }
+    private fun blocks(nodes: List<ASTNode>, src: String): List<MdBlock> = nodes.flatMap { node ->
+        if (node.type == MarkdownElementTypes.HTML_BLOCK) {
+            htmlBlock(node, src)
+        } else {
+            listOfNotNull(block(node, src))
+        }
+    }
 
     private fun block(node: ASTNode, src: String): MdBlock? = when (node.type) {
         MarkdownElementTypes.PARAGRAPH -> inline(node, src).takeUnless { it.isBlank }?.let(MdBlock::Paragraph)
@@ -48,6 +54,12 @@ object MarkdownReader {
         MarkdownTokenTypes.HORIZONTAL_RULE -> MdBlock.Rule
         else -> null
     }
+
+    /**
+     * Вставку HTML внутри Markdown отдаём [HtmlReader]: модель нередко пишет прозу разметкой
+     * Markdown, а таблицу — тегами. Раньше такой блок молча пропадал.
+     */
+    private fun htmlBlock(node: ASTNode, src: String): List<MdBlock> = HtmlReader.parse(node.text(src))
 
     private fun heading(level: Int, node: ASTNode, src: String): MdBlock.Heading {
         val content = node.children.firstOrNull { it.type == MarkdownTokenTypes.ATX_CONTENT }
@@ -205,6 +217,10 @@ object MarkdownReader {
 
             // Маркер продолжения цитаты — разметка, а не текст: во второй строке `>` не нужен.
             MarkdownTokenTypes.BLOCK_QUOTE -> Unit
+
+            // Одиночный тег посреди абзаца показывать угловыми скобками некрасиво: начертание
+            // такой вставки всё равно потеряно, а сам тег игроку не нужен.
+            MarkdownTokenTypes.HTML_TAG -> Unit
 
             else -> if (node.children.isEmpty()) {
                 append(out, node.text(src), style)

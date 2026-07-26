@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
 import org.example.overlay.input.VirtualKeys
-import org.example.overlay.markdown.MarkdownReader
+import org.example.overlay.markdown.AnswerContent
 
 /** Управление голосовым трактом: клавиша, режим, запасной путь закрытия хода (§5). */
 @Composable
@@ -123,7 +123,7 @@ fun VoiceScreen(state: AppState) {
             Text("—", color = OverlayColors.TextDim, fontSize = 13.sp)
         } else {
             // Тот же рендер, что в HUD: в консоли места больше, таблицы видно целиком.
-            val blocks = remember(assistantText) { MarkdownReader.parse(assistantText) }
+            val blocks = remember(assistantText) { AnswerContent.parse(assistantText) }
             MarkdownView(
                 blocks = blocks,
                 modifier = Modifier

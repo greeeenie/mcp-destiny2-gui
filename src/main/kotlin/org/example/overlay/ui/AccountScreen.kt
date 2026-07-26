@@ -28,11 +28,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-
-private val EXPIRY_FORMAT: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("dd.MM HH:mm").withZone(ZoneId.systemDefault())
 
 /** Логин, регистрация и карточка профиля (§3.1, фаза 1). */
 @Composable
@@ -128,7 +123,6 @@ private fun ProfileCard(state: AppState) {
         Spacer(Modifier.height(12.dp))
 
         InfoRow("Пользователь", profile?.name ?: current.username)
-        InfoRow("Сессия до", EXPIRY_FORMAT.format(current.expiresAt))
 
         val linked = profile?.bungieLinked
         InfoRow(
@@ -144,8 +138,7 @@ private fun ProfileCard(state: AppState) {
                 null -> OverlayColors.TextDim
             },
         )
-        profile?.bungieProfile?.displayName?.let { InfoRow("Отображаемое имя", it) }
-        profile?.bungieProfile?.primaryMembershipId?.let { InfoRow("Основной membershipId", it) }
+        profile?.bungieProfile?.displayName?.let { InfoRow("Имя Bungie", it) }
 
         if (linked == false) {
             Spacer(Modifier.height(8.dp))

@@ -41,7 +41,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filterIsInstance
 import org.example.overlay.app.AppState
 import org.example.overlay.app.ToolLogEntry
-import org.example.overlay.markdown.MarkdownReader
+import org.example.overlay.markdown.AnswerContent
 import org.example.overlay.markdown.MdBlock
 import org.example.overlay.platform.ScreenPlacement
 
@@ -87,7 +87,7 @@ fun HudWindow(state: AppState) {
     )
 
     val answer = assistantTranscript.takeIf { settings.showAssistantText }.orEmpty()
-    val blocks = remember(answer) { MarkdownReader.parse(answer) }
+    val blocks = remember(answer) { AnswerContent.parse(answer) }
 
     Window(
         onCloseRequest = { /* HUD не закрывается: выход — через трей */ },

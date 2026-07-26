@@ -1,5 +1,6 @@
 package org.example.overlay.ui
 
+import org.example.overlay.markdown.AnswerContent
 import org.example.overlay.markdown.MarkdownReader
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -58,6 +59,28 @@ class HudSizingTest {
         val long = width("```\nval a = 1\nval веснушкиИДлинноеИмяПеременной = someFunction(arg1, arg2, arg3)\n```")
 
         assertTrue(long > short, "длинная строка кода должна требовать больше места")
+    }
+
+    @Test
+    fun `таблица HTML масштабируется так же, как Markdown`() {
+        // Оба формата дают одну блочную модель, поэтому и размер окна должен получаться один.
+        val markdown = AnswerContent.parse(
+            """
+            | Оружие | Урон | Слот |
+            | --- | --- | --- |
+            | Falling Guillotine | 1200 | тяжёлое |
+            """.trimIndent(),
+        )
+        val html = AnswerContent.parse(
+            "<table><tr><th>Оружие</th><th>Урон</th><th>Слот</th></tr>" +
+                "<tr><td>Falling Guillotine</td><td>1200</td><td>тяжёлое</td></tr></table>",
+        )
+
+        assertEquals(HudSizing.width(markdown, fontSize), HudSizing.width(html, fontSize))
+        assertEquals(
+            HudSizing.height(markdown, fontSize, HudSizing.width(markdown, fontSize)),
+            HudSizing.height(html, fontSize, HudSizing.width(html, fontSize)),
+        )
     }
 
     @Test

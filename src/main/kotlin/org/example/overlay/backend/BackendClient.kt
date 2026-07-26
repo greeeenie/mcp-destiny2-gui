@@ -75,6 +75,15 @@ class BackendClient(
     }
 
     /**
+     * Журнал разговора для сервера (§3.3). Отдельный короткий таймаут: если бэкенд не отвечает,
+     * ждать ради записи в лог нечего — разговор идёт своим чередом.
+     */
+    suspend fun sendVoiceEvents(token: String, events: List<VoiceEventDto>) {
+        if (events.isEmpty()) return
+        post("/voice/events", mapper.writeValueAsString(events), token, VOICE_EVENTS_TIMEOUT).requireSuccess()
+    }
+
+    /**
      * Доступ к Inworld. Ключ Inworld и `x-api-key` MCP-профиля остаются на сервере — сюда
      * приходит только короткоживущий JWT и готовый кадр `session.update` (§3.2).
      */
@@ -184,6 +193,8 @@ class BackendClient(
 
         /** Сервер поднимает MCP-сессию и ходит в Inworld — 20 секунд ему может не хватить. */
         private val VOICE_SESSION_TIMEOUT: Duration = Duration.ofSeconds(30)
+
+        private val VOICE_EVENTS_TIMEOUT: Duration = Duration.ofSeconds(5)
 
         val MAPPER: JsonMapper = JsonMapper.builder()
             .addModule(kotlinModule())
