@@ -146,19 +146,23 @@ fun HudWindow(state: AppState) {
         )
 
         LaunchedEffect(desired) {
+            val position = windowState.position
+            val previous = windowState.size
             windowState.size = desired
 
-            // Выросшее окно не должно уезжать за край: HUD по умолчанию стоит в правом углу.
-            val position = windowState.position
+            // Окно держится за ближайший край экрана: HUD в правом углу растёт и сжимается
+            // влево, не отползая от края с каждым ходом. Заодно не уезжает за границу.
             if (position is WindowPosition.Absolute) {
-                val clamped = ScreenPlacement.clampToScreen(
+                val moved = ScreenPlacement.resize(
                     x = position.x.value,
                     y = position.y.value,
-                    width = desired.width.value,
-                    height = desired.height.value,
+                    oldWidth = previous.width.value,
+                    oldHeight = previous.height.value,
+                    newWidth = desired.width.value,
+                    newHeight = desired.height.value,
                 )
-                if (clamped.x != position.x.value || clamped.y != position.y.value) {
-                    windowState.position = WindowPosition(clamped.x.dp, clamped.y.dp)
+                if (moved.x != position.x.value || moved.y != position.y.value) {
+                    windowState.position = WindowPosition(moved.x.dp, moved.y.dp)
                 }
             }
         }

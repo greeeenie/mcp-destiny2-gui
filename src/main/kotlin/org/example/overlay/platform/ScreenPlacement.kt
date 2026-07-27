@@ -37,6 +37,44 @@ object ScreenPlacement {
     }
 
     /**
+     * Положение окна после программной смены размера.
+     *
+     * Окно якорится к тому краю экрана, к которому стоит ближе: у правого края фиксируется
+     * правый край окна, у нижнего — нижний. Иначе HUD в правом углу вёл себя как прибитый
+     * за левый угол: ответ расширял окно, кламп сдвигал его влево, а сужение на следующем
+     * ходе оставляло окно в этом сдвинутом месте — и оно шаг за шагом уезжало от края.
+     */
+    fun resize(
+        x: Float,
+        y: Float,
+        oldWidth: Float,
+        oldHeight: Float,
+        newWidth: Float,
+        newHeight: Float,
+    ): Placement {
+        val screen = screensInDp().firstOrNull { it.contains(x + oldWidth / 2, y + oldHeight / 2) }
+            ?: screensInDp().firstOrNull()
+        val anchoredX = if (screen != null && anchorsFarEdge(x, oldWidth, screen.x, screen.width)) {
+            x + oldWidth - newWidth
+        } else {
+            x
+        }
+        val anchoredY = if (screen != null && anchorsFarEdge(y, oldHeight, screen.y, screen.height)) {
+            y + oldHeight - newHeight
+        } else {
+            y
+        }
+        return clampToScreen(anchoredX, anchoredY, newWidth, newHeight)
+    }
+
+    /** Ближе ли окно к дальнему краю оси (правому или нижнему), чем к ближнему. */
+    private fun anchorsFarEdge(position: Float, size: Float, screenStart: Float, screenSize: Float): Boolean {
+        val nearGap = position - screenStart
+        val farGap = screenStart + screenSize - (position + size)
+        return farGap < nearGap
+    }
+
+    /**
      * Не дать окну уехать за край экрана после того, как оно выросло под содержимое.
      * По умолчанию HUD стоит в правом верхнем углу, поэтому расширение вправо без этого
      * уводило бы половину таблицы за границу.
