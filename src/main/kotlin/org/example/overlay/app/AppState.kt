@@ -52,8 +52,10 @@ class AppState(
         onUserText = { text ->
             _userTranscript.value = text
             _assistantTranscript.value = assistantBuffer.clear()
-            // Журнал инструментов относится к ходу: с прошлого хода в HUD висели чужие строки.
+            // Журнал инструментов и строка ошибки относятся к ходу: с прошлого хода в HUD
+            // висели чужие строки, а сообщение само не гаснет.
             _toolLog.value = emptyList()
+            _voiceMessage.value = null
         },
         onEvent = ::onChatEvent,
         onMicLevel = { level -> _micLevel.value = level },
@@ -153,7 +155,11 @@ class AppState(
         }
     }
 
-    /** Забыть разговор: сервер чистит историю, оверлей — свои ленты, чтобы вид совпадал. */
+    /**
+     * Забыть разговор: сервер чистит историю, оверлей — свои ленты, чтобы вид совпадал.
+     * Подтверждение не показываем: опустевший HUD и есть подтверждение, а строка сообщения
+     * сама не гаснет и висела бы до следующей ошибки.
+     */
     fun clearConversation() {
         scope.launch {
             try {
@@ -161,7 +167,7 @@ class AppState(
                 _userTranscript.value = ""
                 _assistantTranscript.value = assistantBuffer.clear()
                 _toolLog.value = emptyList()
-                _voiceMessage.value = "История сброшена — следующий вопрос с чистого листа"
+                _voiceMessage.value = null
             } catch (error: Exception) {
                 _voiceMessage.value = "История не сбросилась: ${error.message}"
             }
