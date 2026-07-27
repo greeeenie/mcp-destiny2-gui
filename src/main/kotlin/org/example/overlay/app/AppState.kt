@@ -153,6 +153,21 @@ class AppState(
         }
     }
 
+    /** Забыть разговор: сервер чистит историю, оверлей — свои ленты, чтобы вид совпадал. */
+    fun clearConversation() {
+        scope.launch {
+            try {
+                backend.clearVoiceHistory(requireToken())
+                _userTranscript.value = ""
+                _assistantTranscript.value = assistantBuffer.clear()
+                _toolLog.value = emptyList()
+                _voiceMessage.value = "История сброшена — следующий вопрос с чистого листа"
+            } catch (error: Exception) {
+                _voiceMessage.value = "История не сбросилась: ${error.message}"
+            }
+        }
+    }
+
     private fun onChatEvent(event: ChatStreamEvent) {
         when (event) {
             is ChatStreamEvent.Delta -> _assistantTranscript.value = assistantBuffer.accept(event.text, false)

@@ -91,6 +91,11 @@ class BackendClient(
     suspend fun voiceModels(token: String): VoiceModels =
         rawGet("/voice/models", token).requireSuccess().parse(VoiceModels::class.java)
 
+    /** Сброс истории разговора: сервер забывает контекст, следующий ход — с чистого листа. */
+    suspend fun clearVoiceHistory(token: String) {
+        send(request("/voice/history", token, DEFAULT_TIMEOUT).DELETE().build()).requireSuccess()
+    }
+
     /**
      * Ход разговора потоком. Сервер отдаёт SSE: `delta` — кусок ответа, `tool` — отработавший
      * инструмент, `done` — ответ целиком, `error` — сорвалось. Читаем построчно и отдаём наружу

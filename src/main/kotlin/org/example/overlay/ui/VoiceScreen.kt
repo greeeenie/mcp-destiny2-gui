@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -39,6 +40,8 @@ fun VoiceScreen(state: AppState) {
             // Голос всегда наготове: кнопка нужна только чтобы переоткрыть линии после
             // смены устройства или обрыва.
             Button(onClick = { state.restartVoice() }) { Text("Переоткрыть микрофон") }
+            // Сброс контекста: модель начнёт имитировать не свои прошлые ответы, а промпт.
+            OutlinedButton(onClick = { state.clearConversation() }) { Text("Сбросить историю") }
             Text(
                 text = if (enabled) "микрофон готов" else "микрофон не поднялся",
                 color = if (enabled) OverlayColors.Ok else OverlayColors.Error,
