@@ -150,6 +150,7 @@ object HtmlReader {
                 "code", "kbd", "samp" -> descend(node, style.copy(code = true), out)
                 "s", "del", "strike" -> descend(node, style.copy(strikethrough = true), out)
                 "a" -> descend(node, style.copy(link = node.attr("href").takeIf { it.isNotBlank() }), out)
+                "img" -> appendImage(node, out)
                 "br" -> append(out, " ", style)
                 in DROPPED -> Unit
                 else -> descend(node, style, out)
@@ -161,6 +162,17 @@ object HtmlReader {
 
     private fun descend(element: Element, style: Style, out: MutableList<MdSpan>) {
         element.childNodes().forEach { appendInline(it, style, out) }
+    }
+
+    /** Картинка. Без пригодного `src` от неё остаётся только alt обычным текстом. */
+    private fun appendImage(element: Element, out: MutableList<MdSpan>) {
+        val alt = element.attr("alt").trim()
+        val url = MdImages.resolve(element.attr("src"))
+        if (url == null) {
+            if (alt.isNotEmpty()) append(out, alt, Style())
+        } else {
+            out += MdSpan(text = alt, image = url)
+        }
     }
 
     private fun append(spans: MutableList<MdSpan>, text: String, style: Style) {
@@ -186,7 +198,9 @@ object HtmlReader {
         val merged = mutableListOf<MdSpan>()
         spans.forEach { span ->
             val last = merged.lastOrNull()
-            if (last != null && last.copy(text = "") == span.copy(text = "")) {
+            // Картинки не склеиваются даже одинаковые: две иконки подряд — это две иконки.
+            val glueable = span.image == null && last?.image == null
+            if (last != null && glueable && last.copy(text = "") == span.copy(text = "")) {
                 merged[merged.lastIndex] = last.copy(text = last.text + span.text)
             } else {
                 merged += span
@@ -200,7 +214,8 @@ object HtmlReader {
         val trimmed = spans.toMutableList()
         trimmed[0] = trimmed[0].copy(text = trimmed[0].text.trimStart())
         trimmed[trimmed.lastIndex] = trimmed.last().copy(text = trimmed.last().text.trimEnd())
-        return MdInline(trimmed.filter { it.text.isNotEmpty() })
+        // Пустой текст — ещё не пустой отрезок: у картинки alt бывает пустым.
+        return MdInline(trimmed.filter { it.text.isNotEmpty() || it.image != null })
     }
 
     private val WHITESPACE_RUN = Regex("\\s{2,}")

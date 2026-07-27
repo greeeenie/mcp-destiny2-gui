@@ -36,12 +36,21 @@ enum class MdAlign { LEFT, CENTER, RIGHT }
 data class MdInline(val spans: List<MdSpan>) {
     val plainText: String get() = spans.joinToString("") { it.text }
 
-    val isBlank: Boolean get() = plainText.isBlank()
+    val isBlank: Boolean get() = plainText.isBlank() && spans.none { it.image != null }
+
+    /**
+     * Длина для оценки ширины окна и колонок. Иконка рисуется в пару символов шириной,
+     * какой бы длинный alt у неё ни был, — иначе колонка из иконок раздувалась бы под текст,
+     * которого на экране нет.
+     */
+    val visualLength: Int get() = spans.sumOf { span -> if (span.image != null) IMAGE_CHARS else span.text.length }
 
     companion object {
         val EMPTY = MdInline(emptyList())
 
         fun plain(text: String) = MdInline(listOf(MdSpan(text)))
+
+        private const val IMAGE_CHARS = 3
     }
 }
 
@@ -52,4 +61,6 @@ data class MdSpan(
     val code: Boolean = false,
     val strikethrough: Boolean = false,
     val link: String? = null,
+    /** URL картинки. Когда задан, [text] — это alt: подпись на случай, если загрузка не удалась. */
+    val image: String? = null,
 )

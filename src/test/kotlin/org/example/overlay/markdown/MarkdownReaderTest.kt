@@ -149,4 +149,31 @@ class MarkdownReaderTest {
             blocks.map { it::class },
         )
     }
+
+    @Test
+    fun `картинка становится отрезком с URL и alt`() {
+        val block = assertIs<MdBlock.Paragraph>(
+            single("![Фугасный снаряд](/common/destiny2_content/icons/abc.png)"),
+        )
+        val span = block.text.spans.single()
+
+        assertEquals("https://www.bungie.net/common/destiny2_content/icons/abc.png", span.image)
+        assertEquals("Фугасный снаряд", span.text)
+    }
+
+    @Test
+    fun `картинка в ячейке таблицы разбирается`() {
+        val table = assertIs<MdBlock.Table>(
+            single(
+                """
+                | Перк |
+                | --- |
+                | ![Слайдшот](https://www.bungie.net/i.png) |
+                """.trimIndent(),
+            ),
+        )
+        val cell = table.rows.single().single()
+
+        assertEquals("https://www.bungie.net/i.png", cell.spans.single().image)
+    }
 }

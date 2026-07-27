@@ -13,9 +13,7 @@ import org.example.overlay.app.AppState
 import org.example.overlay.app.SettingsHolder
 import org.example.overlay.app.SettingsStore
 import org.example.overlay.backend.BackendClient
-import org.example.overlay.backend.BackendToolExecutor
 import org.example.overlay.backend.SessionStore
-import org.example.overlay.backend.VoiceSessionProvider
 import org.example.overlay.ui.ConsoleWindow
 import org.example.overlay.ui.HudWindow
 import org.example.overlay.ui.TrayIconPainter
@@ -34,29 +32,16 @@ fun main() {
     val backend = BackendClient(baseUrl = { settingsHolder.current.baseUrl }, http = httpClient)
     val sessionStore = SessionStore(paths.sessionFile)
 
-    // Ссылка на состояние появляется позже, поэтому токен читается через держатель.
-    lateinit var state: AppState
-    val tokenProvider = { state.session.value?.token }
-
-    val voiceSessionProvider = VoiceSessionProvider(backend, tokenProvider, appScope)
-    val toolExecutor = BackendToolExecutor(
-        backend = backend,
-        tokenProvider = tokenProvider,
-        onResult = { name, result -> state.onToolResult(name, result) },
-    )
-
-    state = AppState(
+    val state = AppState(
         settingsHolder = settingsHolder,
         sessionStore = sessionStore,
         backend = backend,
         scope = appScope,
-        voiceSessionProvider = voiceSessionProvider,
-        toolExecutor = toolExecutor,
-        httpClient = httpClient,
     )
 
-    // Первый запуск: без выбранных устройств и клавиши оверлей бесполезен, поэтому открываем консоль.
-    if (!settingsHolder.current.firstRunCompleted) state.setConsoleVisible(true)
+    // Без входа оверлей бесполезен: голос упрётся в «нет сессии бэкенда». Сессию `AppState`
+    // восстанавливает в конструкторе, поэтому проверка здесь уже видит результат.
+    if (state.session.value == null) state.setConsoleVisible(true)
 
     application {
         val consoleVisible by state.consoleVisible.collectAsState()
@@ -74,7 +59,7 @@ fun main() {
         HudWindow(state)
 
         if (consoleVisible) {
-            ConsoleWindow(state, paths, onClose = { state.setConsoleVisible(false) })
+            ConsoleWindow(state, onClose = { state.setConsoleVisible(false) })
         }
     }
 

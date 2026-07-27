@@ -25,17 +25,6 @@ data class BungieProfile(
     val displayName: String? = null,
 )
 
-data class ToolInfo(
-    val name: String,
-    val description: String? = null,
-    /**
-     * Подсказка сервера о характере инструмента. UI на неё не опирается: у `transferWeapon`
-     * она врёт (риск 9 плана) — список изменяющих инструментов ведём свой.
-     */
-    val executionMode: String? = null,
-    val parameters: JsonNode? = null,
-)
-
 /**
  * Ответ `POST /tools/{name}`. Статусы совпадают с донорским `ToolResultStatus` один в один,
  * поэтому конвертация не нужна — строка уезжает в `function_call_output` как есть (§3.3).
@@ -51,17 +40,3 @@ data class ToolCallResult(
         const val STATUS_SUCCESS = "SUCCESS"
     }
 }
-
-/**
- * Событие для `POST /voice/events` (§3.3). Сокет с Inworld держит оверлей, поэтому реплики
- * игрока и ответы модели сервер видит только отсюда — без них в его журнале остаются одни
- * вызовы инструментов.
- */
-data class VoiceEventDto(
-    val type: String,
-    val speaker: String? = null,
-    val text: String? = null,
-    val final: Boolean = true,
-    val name: String? = null,
-    val status: String? = null,
-)

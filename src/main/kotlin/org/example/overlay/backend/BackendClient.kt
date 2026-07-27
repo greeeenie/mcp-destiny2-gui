@@ -2,7 +2,6 @@ package org.example.overlay.backend
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import tools.jackson.core.type.TypeReference
 import tools.jackson.databind.DeserializationFeature
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
@@ -15,7 +14,15 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.time.Duration
-import java.time.Instant
+import java.util.Base64
+
+/** Событие потока ответа: то, что пришло по SSE от `/voice/chat`. */
+sealed interface ChatStreamEvent {
+    data class Delta(val text: String) : ChatStreamEvent
+    data class Tool(val name: String, val status: String, val durationMs: Long) : ChatStreamEvent
+    data class Done(val text: String) : ChatStreamEvent
+    data class Failed(val message: String) : ChatStreamEvent
+}
 
 /** Ошибка бэкенда. Тело ошибок всегда `{"error": "..."}` — деталей внешних систем в нём нет. */
 open class BackendException(
@@ -28,8 +35,8 @@ open class BackendException(
 class UnauthorizedException(message: String) : BackendException(401, message)
 
 /**
- * Клиент `mcp-destiny2-client` на `java.net.http` — том же, на котором построен транспорт
- * Inworld: один стек HTTP на REST и WebSocket, лишних зависимостей нет (§7).
+ * Клиент `mcp-destiny2-client` на `java.net.http`: лишних зависимостей нет (§7). С Inworld
+ * оверлей не разговаривает вовсе — ключ и весь голосовой тракт живут на сервере (риск 10).
  *
  * Запросы блокирующие и уходят на `Dispatchers.IO`: асинхронный API `HttpClient` здесь ничего
  * не даёт, а читать код проще.
@@ -59,9 +66,6 @@ class BackendClient(
     suspend fun profile(token: String): Profile =
         rawGet("/profile", token).requireSuccess().parse(Profile::class.java)
 
-    suspend fun tools(token: String): List<ToolInfo> =
-        rawGet("/tools", token).requireSuccess().parse(object : TypeReference<List<ToolInfo>>() {})
-
     /**
      * Вызов инструмента. Таймаут больше обычного: MCP-сессия на той стороне поднимается
      * на каждый запрос (риск 2), а обрывать инструмент раньше сервера бессмысленно.
@@ -74,51 +78,69 @@ class BackendClient(
             .parse(ToolCallResult::class.java)
     }
 
-    /**
-     * Журнал разговора для сервера (§3.3). Отдельный короткий таймаут: если бэкенд не отвечает,
-     * ждать ради записи в лог нечего — разговор идёт своим чередом.
-     */
-    suspend fun sendVoiceEvents(token: String, events: List<VoiceEventDto>) {
-        if (events.isEmpty()) return
-        post("/voice/events", mapper.writeValueAsString(events), token, VOICE_EVENTS_TIMEOUT).requireSuccess()
-    }
-
-    /**
-     * Доступ к Inworld. Ключ Inworld и `x-api-key` MCP-профиля остаются на сервере — сюда
-     * приходит только короткоживущий JWT и готовый кадр `session.update` (§3.2).
-     */
-    suspend fun voiceSession(token: String): VoiceAccess {
-        val body = send(
-            request("/voice/session", token, VOICE_SESSION_TIMEOUT)
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build(),
-        ).requireSuccess().body()
-
-        val root = try {
-            mapper.readTree(body)
-        } catch (error: Exception) {
-            throw BackendException(200, "Не разобрать ответ /voice/session: ${error.message}", error)
-        }
-        val sessionUpdate = root.path("sessionUpdate")
-        if (sessionUpdate.isMissingNode || sessionUpdate.isNull) {
-            throw BackendException(200, "В ответе /voice/session нет sessionUpdate")
-        }
-        return VoiceAccess(
-            token = root.path("token").asString(),
-            tokenType = root.path("tokenType").asString().ifBlank { "Bearer" },
-            expiresAt = parseInstant(root.path("expiresAt").asString()),
-            uri = URI.create(root.path("uri").asString()),
-            audio = mapper.treeToValue(root.path("audio"), VoiceAudioSettings::class.java),
-            client = mapper.treeToValue(root.path("client"), VoiceClientSettings::class.java),
-            // Строкой и без изменений — это и есть смысл контракта.
-            sessionUpdate = sessionUpdate.toString(),
+    /** Речь в текст. Аудио уходит WAV в base64: кодек сервер определяет сам. */
+    suspend fun transcribe(token: String, wav: ByteArray): String {
+        val body = mapper.writeValueAsString(
+            mapper.createObjectNode().put("audioBase64", Base64.getEncoder().encodeToString(wav)),
         )
+        val response = post("/voice/transcribe", body, token, TRANSCRIBE_TIMEOUT).requireSuccess()
+        return mapper.readTree(response.body()).path("text").asString().trim()
     }
 
-    private fun parseInstant(raw: String): Instant = try {
-        Instant.parse(raw)
-    } catch (error: Exception) {
-        throw BackendException(200, "Неразбираемый expiresAt в /voice/session: '$raw'", error)
+    /**
+     * Ход разговора потоком. Сервер отдаёт SSE: `delta` — кусок ответа, `tool` — отработавший
+     * инструмент, `done` — ответ целиком, `error` — сорвалось. Читаем построчно и отдаём наружу
+     * по мере поступления, поэтому текст появляется в HUD, пока модель ещё пишет.
+     */
+    suspend fun streamChat(token: String, text: String, onEvent: (ChatStreamEvent) -> Unit) {
+        val body = mapper.writeValueAsString(mapper.createObjectNode().put("text", text))
+        val request = request("/voice/chat", token, CHAT_TIMEOUT)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+            .build()
+
+        withContext(Dispatchers.IO) {
+            val response = try {
+                http.send(request, HttpResponse.BodyHandlers.ofInputStream())
+            } catch (error: IOException) {
+                throw BackendException(0, "Бэкенд недоступен: ${error.message ?: error.javaClass.simpleName}", error)
+            }
+            response.body().use { input ->
+                if (response.statusCode() == 401) throw UnauthorizedException("Сессия недействительна")
+                if (response.statusCode() !in 200..299) {
+                    throw BackendException(response.statusCode(), "Бэкенд ответил HTTP ${response.statusCode()}")
+                }
+                var eventName = "message"
+                input.bufferedReader(StandardCharsets.UTF_8).forEachLine { line ->
+                    when {
+                        line.startsWith("event:") -> eventName = line.removePrefix("event:").trim()
+                        line.startsWith("data:") -> {
+                            val payload = line.removePrefix("data:").trim()
+                            if (payload.isNotEmpty()) onEvent(chatEvent(eventName, payload))
+                        }
+                        // Пустая строка закрывает событие: следующее начнётся со своего event.
+                        line.isBlank() -> eventName = "message"
+                    }
+                }
+            }
+        }
+    }
+
+    private fun chatEvent(name: String, payload: String): ChatStreamEvent {
+        val node = runCatching { mapper.readTree(payload) }.getOrNull()
+        val text = node?.path("text")?.asString().orEmpty()
+        return when (name) {
+            "delta" -> ChatStreamEvent.Delta(text)
+            "done" -> ChatStreamEvent.Done(text)
+            "tool" -> ChatStreamEvent.Tool(
+                name = node?.path("name")?.asString().orEmpty(),
+                status = node?.path("status")?.asString().orEmpty(),
+                durationMs = node?.path("durationMs")?.asLong() ?: 0L,
+            )
+
+            else -> ChatStreamEvent.Failed(node?.path("message")?.asString()?.ifBlank { null } ?: "Ход не удался")
+        }
     }
 
     private fun credentials(username: String, password: String): String =
@@ -181,20 +203,15 @@ class BackendClient(
         throw BackendException(statusCode(), "Не разобрать ответ бэкенда: ${error.message}", error)
     }
 
-    private fun <T> HttpResponse<String>.parse(type: TypeReference<T>): T = try {
-        mapper.readValue(body(), type)
-    } catch (error: Exception) {
-        throw BackendException(statusCode(), "Не разобрать ответ бэкенда: ${error.message}", error)
-    }
-
     companion object {
         private val DEFAULT_TIMEOUT: Duration = Duration.ofSeconds(20)
         private val TOOL_CALL_TIMEOUT: Duration = Duration.ofSeconds(60)
 
-        /** Сервер поднимает MCP-сессию и ходит в Inworld — 20 секунд ему может не хватить. */
-        private val VOICE_SESSION_TIMEOUT: Duration = Duration.ofSeconds(30)
+        /** Расшифровка идёт батчем: полминуты речи Inworld разбирает не мгновенно. */
+        private val TRANSCRIBE_TIMEOUT: Duration = Duration.ofSeconds(45)
 
-        private val VOICE_EVENTS_TIMEOUT: Duration = Duration.ofSeconds(5)
+        /** Ход с инструментами живёт дольше обычного запроса: ждём весь поток. */
+        private val CHAT_TIMEOUT: Duration = Duration.ofMinutes(2)
 
         val MAPPER: JsonMapper = JsonMapper.builder()
             .addModule(kotlinModule())

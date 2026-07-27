@@ -16,22 +16,14 @@ import org.example.overlay.audio.AudioSelfTest
 import org.example.overlay.backend.AuthorizationLink
 import org.example.overlay.backend.BackendClient
 import org.example.overlay.backend.BackendException
+import org.example.overlay.backend.ChatStreamEvent
 import org.example.overlay.backend.Profile
 import org.example.overlay.backend.SessionStore
 import org.example.overlay.backend.StoredSession
-import org.example.overlay.backend.ToolInfo
 import org.example.overlay.backend.UnauthorizedException
-import org.example.overlay.backend.VoiceSessionProvider
-import org.example.overlay.conversation.ConversationEvent
-import org.example.overlay.conversation.ConversationFailure
-import org.example.overlay.conversation.ConversationState
 import org.example.overlay.platform.BrowserLauncher
-import org.example.overlay.ptt.ActivationState
-import org.example.overlay.tools.ToolExecutor
 import org.example.overlay.tools.ToolResult
 import org.slf4j.LoggerFactory
-import tools.jackson.databind.JsonNode
-import java.net.http.HttpClient
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -44,25 +36,30 @@ class AppState(
     private val sessionStore: SessionStore,
     private val backend: BackendClient,
     private val scope: CoroutineScope,
-    voiceSessionProvider: VoiceSessionProvider,
-    toolExecutor: ToolExecutor,
-    httpClient: HttpClient,
 ) {
     val settings: StateFlow<Settings> = settingsHolder.settings
 
-    /** Голосовой тракт собирается при включении: до `/voice/session` формат звука неизвестен. */
+    /**
+     * Голос всегда наготове: микрофон и клавиша поднимаются вместе с приложением, соединения
+     * ни с кем не держится — ход уходит на сервер только по отпусканию клавиши.
+     */
     private val voice = VoiceRuntime(
         scope = scope,
         settings = settingsHolder,
-        voiceSessionProvider = voiceSessionProvider,
-        toolExecutor = toolExecutor,
-        httpClient = httpClient,
-        mapper = backend.mapper,
-        onEvent = ::onConversationEvent,
+        backend = backend,
+        tokenProvider = { _session.value?.token },
+        onUserText = { text ->
+            _userTranscript.value = text
+            _assistantTranscript.value = assistantBuffer.clear()
+            // Журнал инструментов относится к ходу: с прошлого хода в HUD висели чужие строки.
+            _toolLog.value = emptyList()
+        },
+        onEvent = ::onChatEvent,
         onMicLevel = { level -> _micLevel.value = level },
+        onError = { message -> _voiceMessage.value = message },
     )
 
-    val voiceEnabled: StateFlow<Boolean> = voice.enabled
+    val voiceEnabled: StateFlow<Boolean> = voice.ready
 
     private val _status = MutableStateFlow<OverlayStatus>(OverlayStatus.Disconnected)
     val status: StateFlow<OverlayStatus> = _status.asStateFlow()
@@ -76,9 +73,6 @@ class AppState(
     private val _profile = MutableStateFlow<Profile?>(null)
     val profile: StateFlow<Profile?> = _profile.asStateFlow()
 
-    private val _tools = MutableStateFlow<List<ToolInfo>>(emptyList())
-    val tools: StateFlow<List<ToolInfo>> = _tools.asStateFlow()
-
     /** Текст под формой логина: ошибка бэкенда или подсказка. */
     private val _accountMessage = MutableStateFlow<String?>(null)
     val accountMessage: StateFlow<String?> = _accountMessage.asStateFlow()
@@ -88,10 +82,6 @@ class AppState(
 
     private val _toolLog = MutableStateFlow<List<ToolLogEntry>>(emptyList())
     val toolLog: StateFlow<List<ToolLogEntry>> = _toolLog.asStateFlow()
-
-    /** Сырой ответ последнего ручного вызова — нужен, чтобы глазами проверить инструмент. */
-    private val _lastToolOutput = MutableStateFlow<String?>(null)
-    val lastToolOutput: StateFlow<String?> = _lastToolOutput.asStateFlow()
 
     private val _micLevel = MutableStateFlow(0f)
     val micLevel: StateFlow<Float> = _micLevel.asStateFlow()
@@ -120,134 +110,62 @@ class AppState(
 
     private var authPollJob: Job? = null
 
-    private val userBuffer = TranscriptBuffer()
     private val assistantBuffer = TranscriptBuffer()
-
-    /** Состояние движка держим отдельно: статус HUD собирается из него и из состояния клавиши. */
-    private val _conversationState = MutableStateFlow<ConversationState>(ConversationState.Idle)
-
-    /** Ход разговора уезжает в журнал сервера: без этого там видны только вызовы инструментов. */
-    private val eventReporter = VoiceEventReporter(scope) { batch ->
-        _session.value?.token?.let { backend.sendVoiceEvents(it, batch) }
-    }
 
     init {
         restoreSession()
-        eventReporter.start()
+        // Микрофон и клавиша поднимаются сразу: соединения это не открывает, а «включать голос»
+        // руками игроку незачем.
+        startVoice()
         scope.launch {
-            combine(_conversationState, voice.activation, voice.enabled, ::resolveStatus)
-                .collect { _status.value = it }
+            combine(voice.phase, voice.ready, ::resolveStatus).collect { _status.value = it }
         }
     }
 
     // --- голос ---
 
-    /** Одно авто-переоткрытие звуковых линий на включение тракта, не больше. */
-    private var audioRecoveryUsed = false
-
-    fun toggleVoice() {
+    /** Поднять микрофон и клавишу. Зовётся при старте: включать голос руками больше нечего. */
+    fun startVoice() {
         scope.launch {
             _voiceMessage.value = null
             try {
-                if (voice.enabled.value) {
-                    voice.disable()
-                } else {
-                    audioRecoveryUsed = false
-                    voice.enable()
-                }
-            } catch (error: UnauthorizedException) {
-                logout()
-                _voiceMessage.value = "Сессия недействительна — войди заново"
+                voice.start()
             } catch (error: Throwable) {
-                // Именно Throwable: VerifyError и прочие Error иначе убивают корутину молча,
-                // и кнопка выглядит сломанной, хотя проблема совсем в другом месте.
-                log.error("Не удалось переключить голосовой тракт", error)
+                // Именно Throwable: Error иначе убивает корутину молча, и тракт выглядит
+                // сломанным без единого слова в интерфейсе.
+                log.error("Не удалось поднять голосовой тракт", error)
                 _voiceMessage.value = "${error.javaClass.simpleName}: ${error.message ?: "без описания"}"
             }
         }
     }
 
-    private suspend fun onConversationEvent(event: ConversationEvent) {
-        eventReporter.report(event)
+    /** Переоткрыть звуковые линии: после смены устройства или обрыва (риск 3). */
+    fun restartVoice() {
+        scope.launch {
+            _voiceMessage.value = null
+            runCatching { voice.restart() }
+                .onFailure { error -> _voiceMessage.value = "Звук не поднялся: ${error.message}" }
+        }
+    }
+
+    private fun onChatEvent(event: ChatStreamEvent) {
         when (event) {
-            is ConversationEvent.StateChanged -> {
-                _conversationState.value = event.state
-                if (event.state is ConversationState.Failed) {
-                    _voiceMessage.value = event.state.failure.message
-                    handleConversationFailure(event.state.failure)
-                }
+            is ChatStreamEvent.Delta -> _assistantTranscript.value = assistantBuffer.accept(event.text, false)
+            is ChatStreamEvent.Done -> if (event.text.isNotBlank()) {
+                _assistantTranscript.value = assistantBuffer.accept(event.text, true)
             }
 
-            is ConversationEvent.Transcript -> when (event.speaker) {
-                ConversationEvent.Speaker.USER ->
-                    _userTranscript.value = userBuffer.accept(event.text, event.isFinal)
-
-                ConversationEvent.Speaker.ASSISTANT ->
-                    _assistantTranscript.value = assistantBuffer.accept(event.text, event.isFinal)
-            }
-
-            is ConversationEvent.ResponseStarted -> _assistantTranscript.value = assistantBuffer.clear()
-
-            is ConversationEvent.ToolCompleted -> appendToolLog(
-                ToolLogEntry(event.name, event.status, event.durationMs, event.message),
-            )
-
-            else -> Unit
+            is ChatStreamEvent.Tool -> appendToolLog(ToolLogEntry(event.name, event.status, event.durationMs))
+            is ChatStreamEvent.Failed -> _voiceMessage.value = event.message
         }
     }
 
-    /**
-     * Реакции на отказы (§7 фазы). Всё запускается отдельной корутиной: обработчик живёт внутри
-     * подписки на события движка, а перезапуск тракта эту самую подписку отменяет.
-     */
-    private fun handleConversationFailure(failure: ConversationFailure) {
-        when (failure.category) {
-            ConversationFailure.Category.AUDIO_DEVICE -> scope.launch {
-                if (audioRecoveryUsed) {
-                    _voiceMessage.value = "${failure.message}. Проверь устройство и включи голос кнопкой."
-                    runCatching { voice.disable() }
-                    return@launch
-                }
-                // Одно автоматическое переоткрытие линий, дальше — решение игрока (риск 3).
-                audioRecoveryUsed = true
-                _voiceMessage.value = "Звуковое устройство отвалилось — переоткрываю линии"
-                runCatching {
-                    voice.disable()
-                    voice.enable()
-                }.onFailure { error ->
-                    _voiceMessage.value = "Звук не поднялся: ${error.message}. Включи голос заново кнопкой."
-                }
-            }
-
-            ConversationFailure.Category.AUTHENTICATION -> scope.launch {
-                runCatching { voice.disable() }
-                // Транскрипт при этом не чистим: игрок должен видеть, на чём всё оборвалось.
-                if (failure.message.contains("бэкенд", ignoreCase = true)) {
-                    logout()
-                    _accountMessage.value = "Сессия истекла — войди заново"
-                }
-            }
-
-            else -> Unit
-        }
-    }
-
-    private fun resolveStatus(
-        conversation: ConversationState,
-        activation: ActivationState,
-        voiceOn: Boolean,
-    ): OverlayStatus = when {
-        conversation is ConversationState.Failed -> OverlayStatus.Failed(conversation.failure.message)
-        conversation is ConversationState.Reconnecting -> OverlayStatus.Reconnecting(conversation.attempt)
-        activation is ActivationState.Failed -> OverlayStatus.Failed(activation.message)
-        activation is ActivationState.Connecting -> OverlayStatus.Connecting
-        activation is ActivationState.Listening -> OverlayStatus.Listening
-        activation is ActivationState.Thinking -> OverlayStatus.Thinking
-        // Без озвучки «Говорю» врёт: ассистент отвечает текстом.
-        activation is ActivationState.Speaking ->
-            if (settingsHolder.current.speakResponses) OverlayStatus.Speaking else OverlayStatus.Answering
-        voiceOn -> OverlayStatus.Ready
-        else -> OverlayStatus.Disconnected
+    private fun resolveStatus(phase: VoicePhase, ready: Boolean): OverlayStatus = when {
+        !ready -> OverlayStatus.Disconnected
+        phase == VoicePhase.LISTENING -> OverlayStatus.Listening
+        phase == VoicePhase.TRANSCRIBING -> OverlayStatus.Thinking
+        phase == VoicePhase.ANSWERING -> OverlayStatus.Answering
+        else -> OverlayStatus.Ready
     }
 
     // --- настройки и окна ---
@@ -282,23 +200,10 @@ class AppState(
         sessionStore.clear()
         _session.value = null
         _profile.value = null
-        _tools.value = emptyList()
         _accountMessage.value = null
-        _lastToolOutput.value = null
     }
 
-    fun refreshAccount() = launchAccount { loadProfileAndTools(requireToken()) }
-
-    /** Ручной вызов инструмента из консоли — тот же путь, которым позже пойдёт `function_call`. */
-    fun callTool(name: String, argumentsJson: String) = launchAccount {
-        val token = requireToken()
-        val arguments = parseArguments(argumentsJson)
-        val startedAt = System.nanoTime()
-        val result = backend.callTool(token, name, arguments)
-        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
-        appendToolLog(ToolLogEntry(name, result.status, elapsedMs, result.message))
-        _lastToolOutput.value = backend.mapper.writeValueAsString(result)
-    }
+    fun refreshAccount() = launchAccount { _profile.value = backend.profile(requireToken()) }
 
     // --- звук ---
 
@@ -341,13 +246,6 @@ class AppState(
             _accountMessage.value = result.message ?: "Бэкенд не вернул ссылку авторизации"
         } else {
             showAuthorizationPrompt(url)
-        }
-    }
-
-    /** Голосовой путь: модель сама зовёт `authorize`, ссылку ловим здесь. */
-    fun onToolResult(name: String, result: ToolResult) {
-        if (name == AuthorizationLink.TOOL_NAME || AuthorizationLink.mentionsRelink(result)) {
-            AuthorizationLink.extract(result)?.let(::showAuthorizationPrompt)
         }
     }
 
@@ -404,12 +302,7 @@ class AppState(
         sessionStore.save(session)
         _session.value = session
         settingsHolder.update { it.copy(rememberPassword = rememberPassword) }
-        loadProfileAndTools(session.token)
-    }
-
-    private suspend fun loadProfileAndTools(token: String) {
-        _profile.value = backend.profile(token)
-        _tools.value = backend.tools(token)
+        _profile.value = backend.profile(session.token)
     }
 
     private fun restoreSession() {
@@ -425,15 +318,6 @@ class AppState(
 
     private fun requireToken(): String =
         _session.value?.token ?: throw BackendException(401, "Сначала нужно войти")
-
-    private fun parseArguments(raw: String): JsonNode {
-        if (raw.isBlank()) return backend.mapper.createObjectNode()
-        return try {
-            backend.mapper.readTree(raw)
-        } catch (error: Exception) {
-            throw IllegalArgumentException("Аргументы не разобраны как JSON: ${error.message}")
-        }
-    }
 
     private fun parseExpiry(raw: String): Long = try {
         Instant.parse(raw).epochSecond

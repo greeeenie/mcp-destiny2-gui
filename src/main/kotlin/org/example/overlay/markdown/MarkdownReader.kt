@@ -208,6 +208,8 @@ object MarkdownReader {
                 }
             }
 
+            MarkdownElementTypes.IMAGE -> appendImage(node, src, out)
+
             MarkdownElementTypes.AUTOLINK, GFMTokenTypes.GFM_AUTOLINK -> {
                 val text = node.text(src).trim('<', '>')
                 append(out, text, style.copy(link = text))
@@ -227,6 +229,27 @@ object MarkdownReader {
             } else {
                 descend(node, src, style, out)
             }
+        }
+    }
+
+    /** `![alt](url)` — узел IMAGE со ссылкой внутри. Без пригодного url остаётся alt текстом. */
+    private fun appendImage(node: ASTNode, src: String, out: MutableList<MdSpan>) {
+        val link = node.children.firstOrNull { it.type == MarkdownElementTypes.INLINE_LINK } ?: node
+        val destination = link.children
+            .firstOrNull { it.type == MarkdownElementTypes.LINK_DESTINATION }
+            ?.text(src)
+            ?.trim()
+        val alt = link.children
+            .firstOrNull { it.type == MarkdownElementTypes.LINK_TEXT }
+            ?.text(src)
+            ?.trim('[', ']')
+            ?.trim()
+            .orEmpty()
+        val url = MdImages.resolve(destination)
+        if (url == null) {
+            if (alt.isNotEmpty()) append(out, alt, Style())
+        } else {
+            out += MdSpan(text = alt, image = url)
         }
     }
 
@@ -270,7 +293,9 @@ object MarkdownReader {
         val merged = mutableListOf<MdSpan>()
         spans.forEach { span ->
             val last = merged.lastOrNull()
-            if (last != null && last.copy(text = "") == span.copy(text = "")) {
+            // Картинки не склеиваются даже одинаковые: две иконки подряд — это две иконки.
+            val glueable = span.image == null && last?.image == null
+            if (last != null && glueable && last.copy(text = "") == span.copy(text = "")) {
                 merged[merged.lastIndex] = last.copy(text = last.text + span.text)
             } else {
                 merged += span
@@ -284,7 +309,8 @@ object MarkdownReader {
         val trimmed = spans.toMutableList()
         trimmed[0] = trimmed[0].copy(text = trimmed[0].text.trimStart())
         trimmed[trimmed.lastIndex] = trimmed.last().copy(text = trimmed.last().text.trimEnd())
-        return MdInline(trimmed.filter { it.text.isNotEmpty() })
+        // Пустой текст — ещё не пустой отрезок: у картинки alt бывает пустым.
+        return MdInline(trimmed.filter { it.text.isNotEmpty() || it.image != null })
     }
 
     private fun ASTNode.text(src: String): String = getTextInNode(src).toString()

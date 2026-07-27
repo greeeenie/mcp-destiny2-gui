@@ -1,7 +1,13 @@
 package org.example.overlay.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,9 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.window.WindowDraggableArea
@@ -23,32 +27,47 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
+import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filterIsInstance
 import org.example.overlay.app.AppState
+import org.example.overlay.app.OverlayStatus
 import org.example.overlay.app.ToolLogEntry
 import org.example.overlay.markdown.AnswerContent
-import org.example.overlay.markdown.MdBlock
 import org.example.overlay.platform.ScreenPlacement
 
 private const val POSITION_SAVE_DEBOUNCE_MS = 400L
 
 /** Не больше трёх последних строк инструментов (§5.3). */
 private const val MAX_HUD_TOOL_LINES = 3
+
+/** Высота шапки: она же область захвата шестерёнки, поэтому не меньше пальца на трекпаде. */
+private val HEADER_HEIGHT = 22.dp
+
+/** Поля панели. Вынесены в константу: на них же считается высота окна. */
+private val WINDOW_PADDING = 14.dp
+
+/** Появление ответа. Дольше — HUD кажется медленным: текст уже пришёл, а его ещё прячут. */
+private const val ANSWER_FADE_MS = 220
+
+/** Полоска уровня должна успевать за клавишей, поэтому быстрее ответа. */
+private const val LEVEL_BAR_FADE_MS = 120
 
 /**
  * Оверлей поверх игры (§5.3).
@@ -70,19 +89,16 @@ fun HudWindow(state: AppState) {
     val userTranscript by state.userTranscript.collectAsState()
     val assistantTranscript by state.assistantTranscript.collectAsState()
     val toolLog by state.toolLog.collectAsState()
-    val voiceEnabled by state.voiceEnabled.collectAsState()
     val authUrl by state.authUrl.collectAsState()
     val voiceMessage by state.voiceMessage.collectAsState()
 
-    val autoSize = settings.hud.autoSize
-    val startWidth = if (autoSize) HudSizing.MIN_WIDTH else settings.hud.width
-    val startHeight = if (autoSize) HudSizing.MIN_HEIGHT else settings.hud.height
-
-    // Положение вычисляем один раз при старте: дальше окном управляет пользователь.
-    val placement = remember { ScreenPlacement.resolve(settings.hud.x, settings.hud.y, startWidth, startHeight) }
+    // Стартуем узкой полоской: первый же ответ пересчитает размер под себя.
+    val placement = remember {
+        ScreenPlacement.resolve(settings.hud.x, settings.hud.y, HudSizing.MIN_WIDTH, HudSizing.MIN_HEIGHT)
+    }
     val windowState = rememberWindowState(
-        width = startWidth.dp,
-        height = startHeight.dp,
+        width = HudSizing.MIN_WIDTH.dp,
+        height = HudSizing.MIN_HEIGHT.dp,
         position = WindowPosition(placement.x.dp, placement.y.dp),
     )
 
@@ -116,40 +132,20 @@ fun HudWindow(state: AppState) {
                 }
         }
 
-        // Размер, выставленный руками, запоминаем только когда автоподбор выключен: иначе
-        // сохранялся бы наш же расчёт.
-        if (!autoSize) {
-            LaunchedEffect(windowState) {
-                snapshotFlow { windowState.size }
-                    .debounce(POSITION_SAVE_DEBOUNCE_MS)
-                    .collect { size ->
-                        state.updateSettings { current ->
-                            current.copy(hud = current.hud.copy(width = size.width.value, height = size.height.value))
-                        }
-                    }
-            }
-        }
+        // Ширину считаем из разметки: содержимое подстроится под любую, поэтому спросить его
+        // «сколько надо» нельзя — таблица одинаково согласится и на узкое окно, и на широкое.
+        val width = remember(blocks, settings.hud.fontSize) { HudSizing.width(blocks, settings.hud.fontSize) }
 
-        // Размер считается из самой разметки. Замерять содержимое нельзя: оно живёт внутри окна
-        // и не может померить себя больше окна — высота упиралась бы в текущую.
-        val desired = remember(blocks, settings.hud.fontSize, userTranscript, toolLog.size, authUrl, voiceMessage) {
-            val width = HudSizing.width(blocks, settings.hud.fontSize)
-            val height = HudSizing.height(
-                blocks = blocks,
-                fontSize = settings.hud.fontSize,
-                width = width,
-                extras = HudSizing.Extras(
-                    userTranscript = userTranscript.isNotBlank(),
-                    toolLines = minOf(toolLog.size, MAX_HUD_TOOL_LINES),
-                    authBanner = authUrl != null,
-                    message = voiceMessage != null,
-                ),
-            )
-            DpSize(width.dp, height.dp)
-        }
+        // Высоту, наоборот, меряем по-настоящему. Внутри `verticalScroll` максимальная высота
+        // не ограничена окном, поэтому содержимое честно сообщает, сколько ему нужно.
+        var contentHeight by remember { mutableStateOf(HudSizing.MIN_HEIGHT) }
+        val desired = DpSize(
+            width = width.dp,
+            height = (contentHeight + WINDOW_PADDING.value * 2)
+                .coerceIn(HudSizing.MIN_HEIGHT, HudSizing.MAX_HEIGHT).dp,
+        )
 
-        LaunchedEffect(autoSize, desired) {
-            if (!autoSize) return@LaunchedEffect
+        LaunchedEffect(desired) {
             windowState.size = desired
 
             // Выросшее окно не должно уезжать за край: HUD по умолчанию стоит в правом углу.
@@ -167,6 +163,8 @@ fun HudWindow(state: AppState) {
             }
         }
 
+        val density = LocalDensity.current
+
         OverlayTheme {
             Box(
                 modifier = Modifier
@@ -175,111 +173,140 @@ fun HudWindow(state: AppState) {
                         color = OverlayColors.Background.copy(alpha = settings.hud.opacity.coerceIn(0.3f, 1f)),
                         shape = RoundedCornerShape(12.dp),
                     )
-                    .padding(14.dp),
+                    .padding(WINDOW_PADDING),
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    WindowDraggableArea {
-                        // Тянуть окно можно только за верхнюю полосу: ниже живут текст и ссылки,
-                        // которые нужно выделять и нажимать.
-                        HudHeader(status.label, status.dotColor(), micLevel)
-                    }
-
-                    voiceMessage?.let { message ->
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = message,
-                            color = OverlayColors.Error,
-                            fontSize = 11.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        // Прокрутка нужна не столько игроку, сколько замеру: она снимает с
+                        // содержимого потолок высоты. Заодно длинный ответ можно домотать.
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onSizeChanged { size ->
+                                contentHeight = with(density) { size.height.toDp().value }
+                            },
+                    ) {
+                        HudHeader(
+                            status = status,
+                            micLevel = micLevel,
+                            onOpenConsole = { state.setConsoleVisible(true) },
                         )
-                    }
 
-                    authUrl?.let { url ->
-                        Spacer(Modifier.height(6.dp))
-                        AuthBanner(
-                            url = url,
-                            onOpen = { state.openAuthorizationLink() },
-                            onDismiss = { state.dismissAuthorizationPrompt() },
-                        )
-                    }
+                        voiceMessage?.let { message ->
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = message,
+                                color = OverlayColors.Error,
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
 
-                    if (userTranscript.isNotBlank()) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = userTranscript,
-                            color = OverlayColors.TextDim,
-                            fontSize = (settings.hud.fontSize - 1).sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                        authUrl?.let { url ->
+                            Spacer(Modifier.height(6.dp))
+                            AuthBanner(
+                                url = url,
+                                onOpen = { state.openAuthorizationLink() },
+                                onDismiss = { state.dismissAuthorizationPrompt() },
+                            )
+                        }
 
-                    // Ответ забирает всё свободное место; если расчёт промахнулся — прокрутка.
-                    Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
-                        AnswerPanel(blocks, settings.hud.fontSize)
-                    }
+                        if (userTranscript.isNotBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = userTranscript,
+                                color = OverlayColors.TextDim,
+                                fontSize = (settings.hud.fontSize - 1).sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
 
-                    if (toolLog.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        toolLog.takeLast(MAX_HUD_TOOL_LINES).forEach { entry -> ToolLine(entry) }
-                    }
+                        // Инструменты — над ответом: снизу они отжимали его и обрезали таблицу.
+                        // Хронология при этом сохраняется: спросил → сходил в инструмент → ответил.
+                        if (toolLog.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            toolLog.takeLast(MAX_HUD_TOOL_LINES).forEach { entry -> ToolLine(entry) }
+                        }
 
-                    HudFooter(
-                        voiceEnabled = voiceEnabled,
-                        onToggleVoice = { state.toggleVoice() },
-                        onOpenConsole = { state.setConsoleVisible(true) },
-                    )
+                        // Появление через fade: в начале хода блоки пустеют, с первым куском
+                        // ответ мягко проявляется вместо рывка. Дальше текст дописывается уже
+                        // внутри видимого блока, так что анимация не мигает на каждой дельте.
+                        AnimatedVisibility(
+                            visible = blocks.isNotEmpty(),
+                            enter = fadeIn(tween(ANSWER_FADE_MS)),
+                            exit = fadeOut(tween(ANSWER_FADE_MS / 2)),
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Spacer(Modifier.height(8.dp))
+                                MarkdownView(
+                                    blocks = blocks,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    fontSize = settings.hud.fontSize.sp,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+/**
+ * Шапка: слева иконка состояния, справа шестерёнка в консоль. Тянуть окно можно за всё
+ * между ними — ниже живут текст и ссылки, которые нужно выделять и нажимать.
+ */
 @Composable
-private fun HudHeader(statusLabel: String, statusColor: Color, micLevel: Float) {
+private fun WindowScope.HudHeader(status: OverlayStatus, micLevel: Float, onOpenConsole: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(10.dp).background(statusColor, CircleShape))
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = statusLabel,
-                color = OverlayColors.Text,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.weight(1f))
-            Text("тяни за эту полосу", color = OverlayColors.TextDim, fontSize = 9.sp)
+            WindowDraggableArea(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(HEADER_HEIGHT),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    HudStatusIcon(status, Modifier.size(18.dp))
+                }
+            }
+            Box(
+                modifier = Modifier.size(HEADER_HEIGHT).clickable(onClick = onOpenConsole),
+                contentAlignment = Alignment.Center,
+            ) {
+                GearIcon(OverlayColors.TextDim, Modifier.size(16.dp))
+            }
         }
 
-        Spacer(Modifier.height(8.dp))
-        // Узкая полоска уровня: «микрофон не тот» должно быть видно сразу (§5.3).
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .background(OverlayColors.Surface, RoundedCornerShape(2.dp)),
+        // Полоска уровня живёт только пока клавиша зажата: «микрофон не тот» видно в момент
+        // записи (§5.3), а в остальное время серая линия на всю ширину — просто шум.
+        // Появление анимируем, чтобы шапка не прыгала ступенькой.
+        AnimatedVisibility(
+            visible = status == OverlayStatus.Listening,
+            enter = fadeIn(tween(LEVEL_BAR_FADE_MS)) + expandVertically(tween(LEVEL_BAR_FADE_MS)),
+            exit = fadeOut(tween(LEVEL_BAR_FADE_MS)) + shrinkVertically(tween(LEVEL_BAR_FADE_MS)),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(micLevel.coerceIn(0f, 1f))
-                    .height(4.dp)
-                    .background(OverlayColors.Ok, RoundedCornerShape(2.dp)),
-            )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .background(OverlayColors.Surface, RoundedCornerShape(2.dp)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(micLevel.coerceIn(0f, 1f))
+                            .height(4.dp)
+                            .background(OverlayColors.Ok, RoundedCornerShape(2.dp)),
+                    )
+                }
+            }
         }
     }
-}
-
-@Composable
-private fun AnswerPanel(blocks: List<MdBlock>, fontSize: Float) {
-    if (blocks.isEmpty()) return
-    MarkdownView(
-        blocks = blocks,
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        fontSize = fontSize.sp,
-    )
 }
 
 @Composable
@@ -312,24 +339,4 @@ private fun ToolLine(entry: ToolLogEntry) {
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
-}
-
-@Composable
-private fun HudFooter(voiceEnabled: Boolean, onToggleVoice: () -> Unit, onOpenConsole: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TextButton(onClick = onToggleVoice) {
-            Text(
-                text = if (voiceEnabled) "Выключить голос" else "Включить голос",
-                color = if (voiceEnabled) OverlayColors.Warn else OverlayColors.Ok,
-                fontSize = 12.sp,
-            )
-        }
-        TextButton(onClick = onOpenConsole) {
-            Text("Консоль", color = OverlayColors.Accent, fontSize = 12.sp)
-        }
-    }
 }

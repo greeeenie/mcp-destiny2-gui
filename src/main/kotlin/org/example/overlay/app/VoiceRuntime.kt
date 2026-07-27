@@ -2,9 +2,6 @@ package org.example.overlay.app
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,204 +10,172 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.example.overlay.audio.AudioDevices
 import org.example.overlay.audio.AudioLevelMeter
-import org.example.overlay.audio.GatedAudioInput
 import org.example.overlay.audio.JavaSoundAudioInput
 import org.example.overlay.audio.JavaSoundAudioOutput
 import org.example.overlay.audio.MicrophoneHub
 import org.example.overlay.audio.PcmAudioFormat
-import org.example.overlay.backend.VoiceSessionProvider
-import org.example.overlay.conversation.ConversationEvent
-import org.example.overlay.conversation.ConversationState
+import org.example.overlay.audio.WavEncoder
+import org.example.overlay.backend.BackendClient
+import org.example.overlay.backend.ChatStreamEvent
 import org.example.overlay.input.GlobalHotkey
-import org.example.overlay.inworld.InworldConversationEngine
-import org.example.overlay.inworld.InworldProtocol
-import org.example.overlay.inworld.JdkRealtimeTransport
-import org.example.overlay.inworld.RealtimeTransportFactory
-import org.example.overlay.ptt.ActivationSignal
-import org.example.overlay.ptt.ActivationState
 import org.example.overlay.ptt.JavaSoundActivationSignal
-import org.example.overlay.ptt.PushToTalkController
-import org.example.overlay.tools.ToolExecutor
 import org.slf4j.LoggerFactory
-import tools.jackson.databind.ObjectMapper
-import java.net.http.HttpClient
-import java.time.Duration
-import java.time.Instant
+import java.io.ByteArrayOutputStream
+
+/** Где сейчас ход: клавиша зажата, речь расшифровывается или модель пишет ответ. */
+enum class VoicePhase { IDLE, LISTENING, TRANSCRIBING, ANSWERING }
 
 /**
- * Голосовой тракт целиком: микрофон → гейт → движок → колонка, плюс горячая клавиша.
+ * Голосовой тракт без Realtime-сессии.
  *
- * Собирается только при включении и разбирается при выключении: до первого `/voice/session`
- * оверлей не знает ни частоты, ни размера чанка — своих значений по умолчанию он не заводит (§3.2).
+ * Микрофон и горячая клавиша живут с момента запуска, поэтому «включать голос» нечего:
+ * соединения ни с кем не держится. По удержанию клавиши речь копится в буфер, по отпусканию
+ * уходит на расшифровку, а текст — в ход разговора, ответ которого приходит потоком.
+ *
+ * Расплата за отказ от сокета: частичного транскрипта во время речи нет — у Inworld
+ * стриминговый STT есть только внутри Realtime.
  */
 class VoiceRuntime(
     private val scope: CoroutineScope,
     private val settings: SettingsHolder,
-    private val voiceSessionProvider: VoiceSessionProvider,
-    private val toolExecutor: ToolExecutor,
-    private val httpClient: HttpClient,
-    private val mapper: ObjectMapper,
-    private val onEvent: suspend (ConversationEvent) -> Unit,
+    private val backend: BackendClient,
+    private val tokenProvider: () -> String?,
+    private val onUserText: (String) -> Unit,
+    private val onEvent: (ChatStreamEvent) -> Unit,
     private val onMicLevel: (Float) -> Unit,
+    private val onError: (String) -> Unit,
 ) {
     private val lifecycle = Mutex()
     private var parts: Parts? = null
+    private val recorded = ByteArrayOutputStream()
 
-    private val _enabled = MutableStateFlow(false)
-    val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
+    @Volatile private var recording = false
 
-    private val _activation = MutableStateFlow<ActivationState>(ActivationState.Idle)
-    val activation: StateFlow<ActivationState> = _activation.asStateFlow()
+    private val _phase = MutableStateFlow(VoicePhase.IDLE)
+    val phase: StateFlow<VoicePhase> = _phase.asStateFlow()
 
-    suspend fun enable() = lifecycle.withLock {
+    private val _ready = MutableStateFlow(false)
+    val ready: StateFlow<Boolean> = _ready.asStateFlow()
+
+    suspend fun start() = lifecycle.withLock {
         if (parts != null) return
-
-        // Доступ берём первым делом: из него приходит формат звука, который нужен, чтобы
-        // вообще открыть линии.
-        val access = voiceSessionProvider.get()
         val current = settings.current
-
-        val inputFormat = PcmAudioFormat(access.audio.inputSampleRate)
-        val outputFormat = PcmAudioFormat(access.audio.outputSampleRate)
+        val format = PcmAudioFormat(SAMPLE_RATE)
 
         val microphone = JavaSoundAudioInput(
-            format = inputFormat,
-            chunkMs = access.audio.chunkMs,
+            format = format,
+            chunkMs = CHUNK_MS,
             scope = scope,
             mixer = AudioDevices.resolve(current.audio.inputMixer, AudioDevices.inputs()),
         )
+        // Линия вывода нужна только для тонов открытия и закрытия микрофона.
         val speaker = JavaSoundAudioOutput(
-            format = outputFormat,
+            format = format,
             scope = scope,
             mixer = AudioDevices.resolve(current.audio.outputMixer, AudioDevices.outputs()),
         )
-        val gate = GatedAudioInput(capacity = GATE_CAPACITY)
-
-        // Линию вывода держим сами: она нужна для тонов открытия и закрытия микрофона даже
-        // тогда, когда ответы не озвучиваются.
-        speaker.start()
-
-        val engine = InworldConversationEngine(
-            protocol = InworldProtocol(mapper),
-            transportFactory = RealtimeTransportFactory { JdkRealtimeTransport(httpClient) },
-            voiceSessionProvider = voiceSessionProvider,
-            scope = scope,
-            audioInput = gate,
-            // Без озвучки движок не получает вывод вовсе: аудио-дельты никуда не играются,
-            // а ход завершается не дожидаясь колонки.
-            audioOutput = speaker.takeIf { current.speakResponses },
-            toolExecutor = toolExecutor,
-            // Просить только текст осмысленно лишь тогда, когда звук и не нужен.
-            textOnlyOutput = current.requestTextOnly && !current.speakResponses,
-        )
-
-        val controller = PushToTalkController(
-            engine = engine,
-            gate = gate,
-            signal = RestartingSignal(speaker, outputFormat.sampleRate),
-            scope = scope,
-            chunkBytes = access.audio.chunkBytes,
-            chunkMs = access.audio.chunkMs.toLong(),
-            handsFree = { settings.current.handsFree },
-            commitOnRelease = { settings.current.commitOnRelease },
-        )
+        runCatching { speaker.start() }
+        val signal = JavaSoundActivationSignal(speaker, format.sampleRate)
 
         val hub = MicrophoneHub(microphone, scope) { chunk ->
-            onMicLevel(AudioLevelMeter.level(chunk))
-            controller.onMicrophoneChunk(chunk)
+            onMicLevel(if (recording) AudioLevelMeter.level(chunk) else 0f)
+            if (recording) {
+                synchronized(recorded) {
+                    if (recorded.size() < MAX_RECORDING_BYTES) recorded.write(chunk)
+                }
+            }
         }
+        hub.start()
 
         val hotkey = GlobalHotkey(keyCode = { settings.current.pttKeyCode }, scope = scope)
-
-        val eventJob = scope.launch { engine.events.collect(onEvent) }
-        val activationJob = scope.launch { controller.state.collect { _activation.value = it } }
-        val rotationJob = scope.launch { rotateSocketQuietly(engine) }
-
-        controller.start()
-        hub.start()
-        hotkey.start(onDown = controller::onKeyDown, onUp = controller::onKeyUp)
-
-        parts = Parts(engine, controller, hub, hotkey, speaker, eventJob, activationJob, rotationJob)
-        _enabled.value = true
-        log.info(
-            "Голосовой тракт включён: {} Гц, чанк {} мс, озвучка {}",
-            inputFormat.sampleRate,
-            access.audio.chunkMs,
-            if (current.speakResponses) "включена" else "выключена (просим только текст)",
+        hotkey.start(
+            onDown = {
+                if (_phase.value == VoicePhase.IDLE || _phase.value == VoicePhase.ANSWERING) {
+                    synchronized(recorded) { recorded.reset() }
+                    recording = true
+                    _phase.value = VoicePhase.LISTENING
+                    runCatching { signal.opened() }
+                }
+            },
+            onUp = {
+                if (recording) {
+                    recording = false
+                    runCatching { signal.closed() }
+                    onMicLevel(0f)
+                    finishTurn()
+                }
+            },
         )
+
+        parts = Parts(hub, hotkey, speaker)
+        _ready.value = true
+        log.info("Голосовой тракт готов: {} Гц, клавиша 0x{}", SAMPLE_RATE, current.pttKeyCode.toString(16))
     }
 
-    suspend fun disable() = lifecycle.withLock {
+    suspend fun stop() = lifecycle.withLock {
         val active = parts ?: return
         parts = null
-        _enabled.value = false
+        _ready.value = false
+        recording = false
         active.hotkey.stop()
-        active.controller.stop()
         active.hub.stop()
         runCatching { active.speaker.stop() }
-        active.eventJob.cancel()
-        active.activationJob.cancel()
-        active.rotationJob.cancel()
-        _activation.value = ActivationState.Idle
-        log.info("Голосовой тракт выключен")
+        _phase.value = VoicePhase.IDLE
     }
 
-    /**
-     * Тихая ротация (§4): если сессия открыта, никто не говорит и до истечения JWT меньше
-     * пяти минут — закрываем сокет. Следующее нажатие клавиши поднимет его уже со свежим
-     * токеном, и игрок ничего не заметит.
-     */
-    private suspend fun rotateSocketQuietly(engine: InworldConversationEngine) {
-        while (currentCoroutineContext().isActive) {
-            delay(ROTATION_CHECK_INTERVAL_MS)
-            val expiry = voiceSessionProvider.cachedExpiry() ?: continue
-            val quiet = _activation.value.let { it is ActivationState.FollowUp || it == ActivationState.Idle }
-            val soon = Duration.between(Instant.now(), expiry) < ROTATION_THRESHOLD
-            if (quiet && soon && engine.state.value is ConversationState.Active) {
-                log.info("Токен Inworld скоро истечёт — закрываю сокет между ходами")
-                runCatching { engine.stop() }
-                voiceSessionProvider.invalidate()
+    /** Перезапуск после смены устройства или отвалившейся линии. */
+    suspend fun restart() {
+        stop()
+        start()
+    }
+
+    private fun finishTurn() {
+        val pcm = synchronized(recorded) { recorded.toByteArray().also { recorded.reset() } }
+        if (pcm.size < MIN_RECORDING_BYTES) {
+            // Клавишу задели: расшифровывать полсекунды тишины незачем, это лишний запрос.
+            _phase.value = VoicePhase.IDLE
+            return
+        }
+        _phase.value = VoicePhase.TRANSCRIBING
+        turnJob?.cancel()
+        turnJob = scope.launch {
+            try {
+                val token = tokenProvider() ?: error("Нет сессии бэкенда — нужен вход")
+                val text = backend.transcribe(token, WavEncoder.encode(pcm, SAMPLE_RATE))
+                if (text.isBlank()) {
+                    _phase.value = VoicePhase.IDLE
+                    return@launch
+                }
+                onUserText(text)
+                _phase.value = VoicePhase.ANSWERING
+                backend.streamChat(token, text, onEvent)
+            } catch (error: Throwable) {
+                log.warn("Голосовой ход не удался", error)
+                onError(error.message ?: error.javaClass.simpleName)
+            } finally {
+                _phase.value = VoicePhase.IDLE
             }
         }
     }
 
-    /**
-     * Тоны микрофона живут дольше одной сессии, а движок закрывает линию вывода в конце своей.
-     * Поэтому перед тоном линию переоткрываем: `start()` идемпотентен.
-     */
-    private class RestartingSignal(
-        private val output: JavaSoundAudioOutput,
-        sampleRate: Int,
-    ) : ActivationSignal {
-        private val delegate = JavaSoundActivationSignal(output, sampleRate)
-
-        override suspend fun opened() {
-            runCatching { output.start() }
-            delegate.opened()
-        }
-
-        override suspend fun closed() {
-            runCatching { output.start() }
-            delegate.closed()
-        }
-    }
+    private var turnJob: Job? = null
 
     private class Parts(
-        val engine: InworldConversationEngine,
-        val controller: PushToTalkController,
         val hub: MicrophoneHub,
         val hotkey: GlobalHotkey,
         val speaker: JavaSoundAudioOutput,
-        val eventJob: Job,
-        val activationJob: Job,
-        val rotationJob: Job,
     )
 
     private companion object {
-        /** 4 чанка = 400 мс: очередь намеренно короткая (§2.2). */
-        const val GATE_CAPACITY = 4
-        const val ROTATION_CHECK_INTERVAL_MS = 60_000L
-        val ROTATION_THRESHOLD: Duration = Duration.ofMinutes(5)
+        /** Формат больше не приходит с сервера: расшифровке важна лишь честная шапка WAV. */
+        const val SAMPLE_RATE = 24_000
+        const val CHUNK_MS = 100
+
+        /** Полсекунды — ниже этого запись считается случайным нажатием. */
+        const val MIN_RECORDING_BYTES = SAMPLE_RATE * 2 / 2
+
+        /** Полминуты речи: дальше запрос на расшифровку становится неприлично большим. */
+        const val MAX_RECORDING_BYTES = SAMPLE_RATE * 2 * 30
         val log = LoggerFactory.getLogger(VoiceRuntime::class.java)
     }
 }

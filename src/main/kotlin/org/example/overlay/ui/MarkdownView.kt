@@ -11,14 +11,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
@@ -56,6 +61,7 @@ private fun MarkdownBlock(block: MdBlock, fontSize: TextUnit) {
     when (block) {
         is MdBlock.Heading -> Text(
             text = block.text.annotated(fontSize),
+            inlineContent = block.text.iconContent(fontSize),
             fontSize = headingSize(block.level, fontSize),
             fontWeight = FontWeight.SemiBold,
             color = OverlayColors.Text,
@@ -64,6 +70,7 @@ private fun MarkdownBlock(block: MdBlock, fontSize: TextUnit) {
 
         is MdBlock.Paragraph -> Text(
             text = block.text.annotated(fontSize),
+            inlineContent = block.text.iconContent(fontSize),
             fontSize = fontSize,
             color = OverlayColors.Text,
         )
@@ -171,6 +178,7 @@ private fun TableRow(
             val cell = cells.getOrNull(index)
             Text(
                 text = cell?.annotated(fontSize) ?: AnnotatedString(""),
+                inlineContent = cell?.iconContent(fontSize).orEmpty(),
                 fontSize = if (header) (fontSize.value - 1).sp else fontSize,
                 fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (header) OverlayColors.TextDim else OverlayColors.Text,
@@ -190,8 +198,8 @@ private fun TableRow(
  * сплющивать остальные до нечитаемого состояния.
  */
 private fun columnWeights(table: MdBlock.Table, columns: Int): List<Float> = List(columns) { index ->
-    val header = table.header.getOrNull(index)?.plainText?.length ?: 0
-    val longestCell = table.rows.maxOfOrNull { it.getOrNull(index)?.plainText?.length ?: 0 } ?: 0
+    val header = table.header.getOrNull(index)?.visualLength ?: 0
+    val longestCell = table.rows.maxOfOrNull { it.getOrNull(index)?.visualLength ?: 0 } ?: 0
     maxOf(header, longestCell).coerceIn(MIN_COLUMN_CHARS, MAX_COLUMN_CHARS).toFloat()
 }
 
@@ -209,9 +217,38 @@ private fun headingSize(level: Int, base: TextUnit): TextUnit = when (level) {
 private fun quoteHeight(quote: MdBlock.Quote): androidx.compose.ui.unit.Dp =
     (18 * quote.blocks.size.coerceAtLeast(1)).dp
 
+/** Насколько иконка крупнее кегля: перк в размер строки неразличим, чуть крупнее — читается. */
+private const val ICON_SCALE = 1.7f
+
+/**
+ * Врезки для картинок: Compose рисует их внутри текста через `inlineContent`, ключ — URL.
+ * Пока иконка едет по сети, место держит заглушка того же размера.
+ */
+@Composable
+private fun MdInline.iconContent(fontSize: TextUnit): Map<String, InlineTextContent> {
+    val side = (fontSize.value * ICON_SCALE).sp
+    return spans.mapNotNull { span -> span.image?.let { url -> url to span } }
+        .associate { (url, span) ->
+            url to InlineTextContent(
+                Placeholder(width = side, height = side, PlaceholderVerticalAlign.TextCenter),
+            ) {
+                RemoteIcon(
+                    url = url,
+                    contentDescription = span.text.ifBlank { null },
+                    modifier = Modifier.size(side.value.dp),
+                )
+            }
+        }
+}
+
 @Composable
 private fun MdInline.annotated(fontSize: TextUnit): AnnotatedString = buildAnnotatedString {
     spans.forEach { span ->
+        span.image?.let { url ->
+            // Alt уходит альтернативным текстом: он виден копированию и скринридеру, но не глазу.
+            appendInlineContent(id = url, alternateText = span.text.ifEmpty { " " })
+            return@forEach
+        }
         val style = SpanStyle(
             fontWeight = if (span.bold) FontWeight.SemiBold else null,
             fontStyle = if (span.italic) FontStyle.Italic else null,

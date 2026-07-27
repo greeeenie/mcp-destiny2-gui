@@ -159,4 +159,37 @@ val b = 2</code></pre>"""),
 
         assertIs<MdBlock.Table>(blocks.single())
     }
+
+    @Test
+    fun `картинка становится отрезком с URL, относительный путь Bungie достраивается`() {
+        val block = assertIs<MdBlock.Paragraph>(
+            single("""<p><img src="/common/destiny2_content/icons/abc.png" alt="Фугасный снаряд"></p>"""),
+        )
+        val span = block.text.spans.single()
+
+        assertEquals("https://www.bungie.net/common/destiny2_content/icons/abc.png", span.image)
+        assertEquals("Фугасный снаряд", span.text)
+    }
+
+    @Test
+    fun `картинка в ячейке таблицы не считается пустой даже без alt`() {
+        val table = assertIs<MdBlock.Table>(
+            single(
+                "<table><tr><th>Перк</th></tr>" +
+                    """<tr><td><img src="https://www.bungie.net/i.png"></td></tr></table>""",
+            ),
+        )
+        val cell = table.rows.single().single()
+
+        assertEquals("https://www.bungie.net/i.png", cell.spans.single().image)
+        assertTrue(!cell.isBlank)
+    }
+
+    @Test
+    fun `картинка с мусорным адресом оставляет только alt текстом`() {
+        val block = assertIs<MdBlock.Paragraph>(single("""<p><img src="data:image/png;base64,x" alt="Перк"></p>"""))
+
+        assertEquals(listOf(null), block.text.spans.map { it.image })
+        assertEquals("Перк", block.text.plainText)
+    }
 }

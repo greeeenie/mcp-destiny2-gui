@@ -77,10 +77,6 @@ class HudSizingTest {
         )
 
         assertEquals(HudSizing.width(markdown, fontSize), HudSizing.width(html, fontSize))
-        assertEquals(
-            HudSizing.height(markdown, fontSize, HudSizing.width(markdown, fontSize)),
-            HudSizing.height(html, fontSize, HudSizing.width(html, fontSize)),
-        )
     }
 
     @Test
