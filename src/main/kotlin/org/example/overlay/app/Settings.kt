@@ -11,6 +11,8 @@ data class Settings(
     val audio: AudioSettings = AudioSettings(),
     /** VK-код клавиши push-to-talk. По умолчанию Right Alt (`VK_RMENU`), §5.1. */
     val pttKeyCode: Int = DEFAULT_PTT_KEY_CODE,
+    /** Модель ответа из GET /voice/models. `null` — серверная по умолчанию. */
+    val chatModel: String? = null,
     /**
      * Рисовать ответ в HUD. Озвучки нет, поэтому выключение делает ассистента немым —
      * оставлено только для боя, где нужен один индикатор статуса.

@@ -87,13 +87,19 @@ class BackendClient(
         return mapper.readTree(response.body()).path("text").asString().trim()
     }
 
+    /** Модели на выбор. Список живёт на сервере: оверлей его только показывает. */
+    suspend fun voiceModels(token: String): VoiceModels =
+        rawGet("/voice/models", token).requireSuccess().parse(VoiceModels::class.java)
+
     /**
      * Ход разговора потоком. Сервер отдаёт SSE: `delta` — кусок ответа, `tool` — отработавший
      * инструмент, `done` — ответ целиком, `error` — сорвалось. Читаем построчно и отдаём наружу
      * по мере поступления, поэтому текст появляется в HUD, пока модель ещё пишет.
      */
-    suspend fun streamChat(token: String, text: String, onEvent: (ChatStreamEvent) -> Unit) {
-        val body = mapper.writeValueAsString(mapper.createObjectNode().put("text", text))
+    suspend fun streamChat(token: String, text: String, model: String?, onEvent: (ChatStreamEvent) -> Unit) {
+        val body = mapper.writeValueAsString(
+            mapper.createObjectNode().put("text", text).apply { model?.let { put("model", it) } },
+        )
         val request = request("/voice/chat", token, CHAT_TIMEOUT)
             .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream")

@@ -148,7 +148,7 @@ class VoiceRuntime(
                 }
                 onUserText(text)
                 _phase.value = VoicePhase.ANSWERING
-                backend.streamChat(token, text, onEvent)
+                backend.streamChat(token, text, settings.current.chatModel, onEvent)
             } catch (error: Throwable) {
                 log.warn("Голосовой ход не удался", error)
                 onError(error.message ?: error.javaClass.simpleName)

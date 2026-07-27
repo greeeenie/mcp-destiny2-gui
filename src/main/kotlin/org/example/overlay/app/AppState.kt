@@ -21,6 +21,7 @@ import org.example.overlay.backend.Profile
 import org.example.overlay.backend.SessionStore
 import org.example.overlay.backend.StoredSession
 import org.example.overlay.backend.UnauthorizedException
+import org.example.overlay.backend.VoiceModels
 import org.example.overlay.platform.BrowserLauncher
 import org.example.overlay.tools.ToolResult
 import org.slf4j.LoggerFactory
@@ -72,6 +73,10 @@ class AppState(
 
     private val _profile = MutableStateFlow<Profile?>(null)
     val profile: StateFlow<Profile?> = _profile.asStateFlow()
+
+    /** Модели с сервера. Пусто, пока нет сессии или ручка недоступна — селектор тогда скрыт. */
+    private val _chatModels = MutableStateFlow<VoiceModels?>(null)
+    val chatModels: StateFlow<VoiceModels?> = _chatModels.asStateFlow()
 
     /** Текст под формой логина: ошибка бэкенда или подсказка. */
     private val _accountMessage = MutableStateFlow<String?>(null)
@@ -200,10 +205,19 @@ class AppState(
         sessionStore.clear()
         _session.value = null
         _profile.value = null
+        _chatModels.value = null
         _accountMessage.value = null
     }
 
-    fun refreshAccount() = launchAccount { _profile.value = backend.profile(requireToken()) }
+    fun refreshAccount() = launchAccount { loadAccountData(requireToken()) }
+
+    private suspend fun loadAccountData(token: String) {
+        _profile.value = backend.profile(token)
+        // Список моделей — украшение, а не условие: без него голос работает на серверном дефолте.
+        _chatModels.value = runCatching { backend.voiceModels(token) }
+            .onFailure { error -> log.warn("Список моделей не загрузился: {}", error.toString()) }
+            .getOrNull()
+    }
 
     // --- звук ---
 
@@ -302,7 +316,7 @@ class AppState(
         sessionStore.save(session)
         _session.value = session
         settingsHolder.update { it.copy(rememberPassword = rememberPassword) }
-        _profile.value = backend.profile(session.token)
+        loadAccountData(session.token)
     }
 
     private fun restoreSession() {

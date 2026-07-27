@@ -25,6 +25,17 @@ data class BungieProfile(
     val displayName: String? = null,
 )
 
+/** Ответ `GET /voice/models`: из чего игрок выбирает модель на вкладке «Голос». */
+data class VoiceModels(
+    val default: String,
+    val options: List<VoiceModelOption>,
+)
+
+data class VoiceModelOption(
+    val id: String,
+    val label: String,
+)
+
 /**
  * Ответ `POST /tools/{name}`. Статусы совпадают с донорским `ToolResultStatus` один в один,
  * поэтому конвертация не нужна — строка уезжает в `function_call_output` как есть (§3.3).
