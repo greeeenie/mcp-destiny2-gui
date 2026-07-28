@@ -23,7 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
-import org.example.overlay.backend.VoiceModels
+import org.example.overlay.backend.VoiceModelOption
 import org.example.overlay.input.VirtualKeys
 
 /** Управление голосовым трактом: микрофон, клавиша push-to-talk и модель ответа (§5). */
@@ -79,36 +79,24 @@ fun VoiceScreen(state: AppState) {
 
         models?.let { available ->
             Spacer(Modifier.height(16.dp))
-            Text("Модель ответа", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = OverlayColors.Text)
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                available.options.forEach { option ->
-                    // Выбор хранится только для не-дефолта: null означает «как решил сервер»,
-                    // и смена серверного дефолта тогда подхватывается сама.
-                    val selected = (settings.chatModel ?: available.default) == option.id
-                    Text(
-                        text = option.label,
-                        color = if (selected) OverlayColors.Accent else OverlayColors.Text,
-                        fontSize = 12.sp,
-                        modifier = Modifier
-                            .background(
-                                color = if (selected) OverlayColors.Surface else OverlayColors.Background,
-                                shape = RoundedCornerShape(6.dp),
-                            )
-                            .clickable {
-                                val choice = option.id.takeIf { it != available.default }
-                                state.updateSettings { it.copy(chatModel = choice) }
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Действует со следующего вопроса. ${labelOf(available)} — серверная по умолчанию.",
-                color = OverlayColors.TextDim,
-                fontSize = 11.sp,
+            ModelSelector(
+                title = "Модель ответа",
+                options = available.options,
+                default = available.default,
+                current = settings.chatModel,
+                onSelect = { choice -> state.updateSettings { it.copy(chatModel = choice) } },
             )
+            // Пустой список — сервер без селектора STT: блок тогда не показываем вовсе.
+            if (available.sttOptions.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                ModelSelector(
+                    title = "Модель распознавания речи",
+                    options = available.sttOptions,
+                    default = available.sttDefault,
+                    current = settings.sttModel,
+                    onSelect = { choice -> state.updateSettings { it.copy(sttModel = choice) } },
+                )
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -127,8 +115,47 @@ fun VoiceScreen(state: AppState) {
     }
 }
 
-private fun labelOf(models: VoiceModels): String =
-    models.options.firstOrNull { it.id == models.default }?.label ?: models.default
+/** Ряд моделей на выбор. Выбор хранится только для не-дефолта: null означает «как решил сервер»,
+ * и смена серверного дефолта тогда подхватывается сама. */
+@Composable
+private fun ModelSelector(
+    title: String,
+    options: List<VoiceModelOption>,
+    default: String,
+    current: String?,
+    onSelect: (String?) -> Unit,
+) {
+    Column {
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = OverlayColors.Text)
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { option ->
+                val selected = (current ?: default) == option.id
+                Text(
+                    text = option.label,
+                    color = if (selected) OverlayColors.Accent else OverlayColors.Text,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .background(
+                            color = if (selected) OverlayColors.Surface else OverlayColors.Background,
+                            shape = RoundedCornerShape(6.dp),
+                        )
+                        .clickable { onSelect(option.id.takeIf { it != default }) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Действует со следующего вопроса. ${labelOf(options, default)} — серверная по умолчанию.",
+            color = OverlayColors.TextDim,
+            fontSize = 11.sp,
+        )
+    }
+}
+
+private fun labelOf(options: List<VoiceModelOption>, default: String): String =
+    options.firstOrNull { it.id == default }?.label ?: default
 
 @Composable
 private fun ToggleRow(checked: Boolean, label: String, hint: String, onChange: (Boolean) -> Unit) {

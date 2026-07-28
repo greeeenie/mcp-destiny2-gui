@@ -25,10 +25,13 @@ data class BungieProfile(
     val displayName: String? = null,
 )
 
-/** Ответ `GET /voice/models`: из чего игрок выбирает модель на вкладке «Голос». */
+/** Ответ `GET /voice/models`: из чего игрок выбирает модели на вкладке «Голос». */
 data class VoiceModels(
     val default: String,
     val options: List<VoiceModelOption>,
+    /** STT: дефолт и варианты. Пустой список — сервер старый, селектор расшифровки скрыт. */
+    val sttDefault: String = "",
+    val sttOptions: List<VoiceModelOption> = emptyList(),
 )
 
 data class VoiceModelOption(
