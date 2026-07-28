@@ -47,6 +47,10 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
+            // jlink кладёт в установщик только дефолтные модули, а BackendClient живёт
+            // на java.net.http — без него установленное приложение умирало на старте
+            // с «Failed to launch JVM». Список — из задачи suggestRuntimeModules.
+            modules("java.instrument", "java.net.http", "java.sql", "jdk.unsupported")
             packageName = "mcp-destiny2-gui"
             packageVersion = "1.0.0"
             vendor = "greenie"
