@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
 import org.example.overlay.backend.VoiceModelOption
+import org.example.overlay.backend.VoiceModels
 import org.example.overlay.input.VirtualKeys
 
 /** Управление голосовым трактом: микрофон, клавиша push-to-talk и модель ответа (§5). */
@@ -87,6 +88,7 @@ fun VoiceScreen(state: AppState) {
                     "серверная по умолчанию.",
                 onSelect = { choice -> state.updateSettings { it.copy(chatModel = choice) } },
             )
+            WebSearchIndicator(available, settings.chatModel)
             // Пустой список — сервер без селектора STT: блок тогда не показываем вовсе.
             if (available.sttOptions.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
@@ -152,6 +154,31 @@ private fun ModelSelector(
         }
         Spacer(Modifier.height(4.dp))
         Text(hint, color = OverlayColors.TextDim, fontSize = 11.sp)
+    }
+}
+
+/**
+ * Есть ли у выбранной модели веб-поиск. Игрок должен видеть, откуда берутся ответы про мету:
+ * без поиска модель отвечает из головы и может отстать от патчей.
+ */
+@Composable
+private fun WebSearchIndicator(models: VoiceModels, chatModel: String?) {
+    val selected = models.options.firstOrNull { it.id == (chatModel ?: models.default) }
+    val searchCapable = models.options.filter { it.webSearch }
+    Spacer(Modifier.height(4.dp))
+    if (selected?.webSearch == true) {
+        Text(
+            "Веб-поиск включён: модель ищет мету, патчи и новости в интернете.",
+            color = OverlayColors.Ok,
+            fontSize = 11.sp,
+        )
+    } else {
+        val capableNote = searchCapable
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString { it.label }
+            ?.let { " Он есть у: $it." }
+            .orEmpty()
+        Text("Веб-поиск выключен — модель без него.$capableNote", color = OverlayColors.TextDim, fontSize = 11.sp)
     }
 }
 

@@ -37,6 +37,8 @@ data class VoiceModels(
 data class VoiceModelOption(
     val id: String,
     val label: String,
+    /** Умеет ли модель искать в интернете: сервер даёт поиск не всем. */
+    val webSearch: Boolean = false,
 )
 
 /**
