@@ -133,6 +133,21 @@ fun DotsIcon(color: Color, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Обратный отсчёт до сворачивания: дуга на бледном кольце тает по часовой стрелке.
+ * [fraction] — сколько времени осталось, от 1 (полное кольцо) до 0.
+ */
+@Composable
+fun CountdownIcon(color: Color, fraction: Float, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val u = unit()
+        val topLeft = at(3f, 3f)
+        val box = Size(18f * u, 18f * u)
+        drawArc(color.copy(alpha = 0.25f), 0f, 360f, false, topLeft, box, style = line(u))
+        drawArc(color, -90f, 360f * fraction.coerceIn(0f, 1f), false, topLeft, box, style = line(u))
+    }
+}
+
 /** Шестерёнка: открывает консоль. Контур, а не заливка — дырку в прозрачном окне не вырезать. */
 @Composable
 fun GearIcon(color: Color, modifier: Modifier = Modifier) {

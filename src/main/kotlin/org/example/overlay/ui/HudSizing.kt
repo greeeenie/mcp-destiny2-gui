@@ -16,8 +16,13 @@ object HudSizing {
 
     const val MIN_WIDTH = 300f
     const val MAX_WIDTH = 900f
-    const val MIN_HEIGHT = 84f
+
+    /** Пустая полоса: шапка с иконкой, дорожкой уровня и шестерёнкой плюс поля окна. */
+    const val MIN_HEIGHT = 50f
     const val MAX_HEIGHT = 560f
+
+    /** Сторона свёрнутой пилюли: в покое HUD — квадрат с одной иконкой микрофона. */
+    const val COLLAPSED = 48f
 
     /** Ширина панели за вычетом текста: отступы окна и полоса прокрутки. */
     private const val HORIZONTAL_CHROME = 44f

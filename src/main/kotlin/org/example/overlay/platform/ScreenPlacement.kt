@@ -67,6 +67,19 @@ object ScreenPlacement {
         return clampToScreen(anchoredX, anchoredY, newWidth, newHeight)
     }
 
+    data class Anchors(val end: Boolean, val bottom: Boolean)
+
+    /** К каким краям экрана окно прижато: к тем же краям прижимается панель внутри кожуха. */
+    fun anchors(x: Float, y: Float, width: Float, height: Float): Anchors {
+        val screen = screensInDp().firstOrNull { it.contains(x + width / 2, y + height / 2) }
+            ?: screensInDp().firstOrNull()
+            ?: return Anchors(end = false, bottom = false)
+        return Anchors(
+            end = anchorsFarEdge(x, width, screen.x, screen.width),
+            bottom = anchorsFarEdge(y, height, screen.y, screen.height),
+        )
+    }
+
     /** Ближе ли окно к дальнему краю оси (правому или нижнему), чем к ближнему. */
     private fun anchorsFarEdge(position: Float, size: Float, screenStart: Float, screenSize: Float): Boolean {
         val nearGap = position - screenStart

@@ -7,7 +7,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.example.overlay.audio.AudioDeviceException
@@ -119,6 +121,23 @@ class AppState(
 
     private val assistantBuffer = TranscriptBuffer()
 
+    /** Курсор над HUD: отсчёт сворачивания стоит на месте и сброшен на старт. */
+    private val _hudHovered = MutableStateFlow(false)
+
+    /**
+     * Сколько осталось висеть развёрнутым после ответа: 1 → только начали, 0 → пора сворачиваться,
+     * `null` — отсчёт не идёт. HUD рисует из этого кольцо на месте статусной иконки.
+     */
+    private val _collapseFraction = MutableStateFlow<Float?>(null)
+    val collapseFraction: StateFlow<Float?> = _collapseFraction.asStateFlow()
+
+    /**
+     * Отсчёт истёк — HUD сворачивается. Лента при этом ещё не тронута: она чистится с задержкой,
+     * чтобы ответ оставался виден, пока панель схлопывается, и уезжал за её край.
+     */
+    private val _hudDismissed = MutableStateFlow(false)
+    val hudDismissed: StateFlow<Boolean> = _hudDismissed.asStateFlow()
+
     init {
         restoreSession()
         // Микрофон и клавиша поднимаются сразу: соединения это не открывает, а «включать голос»
@@ -127,6 +146,67 @@ class AppState(
         scope.launch {
             combine(voice.phase, voice.ready, ::resolveStatus).collect { _status.value = it }
         }
+        scope.launch { runCollapseCountdown() }
+    }
+
+    /**
+     * Автосворачивание HUD: ход закончился, ответ повисел [HudSettings.collapseSeconds] секунд —
+     * лента чистится, и HUD спадает в пилюлю. Наведение курсора не просто ставит отсчёт на паузу,
+     * а возвращает его на старт: игрок читает — торопить нечего.
+     *
+     * Плашка авторизации Bungie отсчёт блокирует: её нельзя «досмотреть», по ней нужно сходить.
+     */
+    private suspend fun runCollapseCountdown() {
+        val hasContent = combine(_userTranscript, _assistantTranscript, _toolLog, _voiceMessage) { user, answer, tools, message ->
+            user.isNotBlank() || answer.isNotBlank() || tools.isNotEmpty() || message != null
+        }
+        combine(_status, hasContent, _authUrl) { status, content, auth ->
+            status == OverlayStatus.Ready && content && auth == null
+        }
+            .distinctUntilChanged()
+            .collectLatest { eligible ->
+                if (!eligible) {
+                    _collapseFraction.value = null
+                    return@collectLatest
+                }
+                val totalMs = settings.value.hud.collapseSeconds
+                    .coerceIn(HudSettings.MIN_COLLAPSE_SECONDS, HudSettings.MAX_COLLAPSE_SECONDS) * 1000L
+                var remainingMs = totalMs
+                _collapseFraction.value = 1f
+                while (remainingMs > 0) {
+                    delay(COLLAPSE_TICK_MS)
+                    if (_hudHovered.value) {
+                        remainingMs = totalMs
+                        _collapseFraction.value = 1f
+                    } else {
+                        remainingMs -= COLLAPSE_TICK_MS
+                        _collapseFraction.value = (remainingMs.toFloat() / totalMs).coerceAtLeast(0f)
+                    }
+                }
+                _collapseFraction.value = null
+                _hudDismissed.value = true
+                try {
+                    // Панель схлопывается с ещё живым контентом; чистим, когда анимация точно
+                    // закончилась. Отмена (новый ход, плашка авторизации) тоже проходит через
+                    // finally: свёрнутый ответ в любом случае больше не нужен.
+                    delay(HUD_DISMISS_CLEAR_MS)
+                } finally {
+                    clearHudFeed()
+                    _hudDismissed.value = false
+                }
+            }
+    }
+
+    fun setHudHovered(hovered: Boolean) {
+        _hudHovered.value = hovered
+    }
+
+    /** Убрать с экрана прошедший ход. Только лента HUD: серверная история не трогается. */
+    private fun clearHudFeed() {
+        _userTranscript.value = ""
+        _assistantTranscript.value = assistantBuffer.clear()
+        _toolLog.value = emptyList()
+        _voiceMessage.value = null
     }
 
     // --- голос ---
@@ -387,5 +467,11 @@ class AppState(
         const val MAX_TOOL_LOG = 50
         const val POLL_INTERVAL_MS = 3_000L
         const val POLL_LIMIT_MINUTES = 5L
+
+        /** Шаг отсчёта сворачивания: кольцо в 18 dp чаще перерисовывать незачем. */
+        const val COLLAPSE_TICK_MS = 100L
+
+        /** Запас на двухфазную анимацию сворачивания, после него лента чистится незаметно. */
+        const val HUD_DISMISS_CLEAR_MS = 900L
     }
 }

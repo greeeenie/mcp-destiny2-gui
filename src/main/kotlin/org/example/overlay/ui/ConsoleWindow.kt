@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Slider
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.rememberWindowState
 import org.example.overlay.app.AppState
+import org.example.overlay.app.HudSettings
 import kotlin.math.roundToInt
 
 /** Обычное фокусируемое окно: аккаунт, голос, звук, оверлей (§5.3). */
@@ -64,7 +66,7 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
 
 /**
  * Размер и положение HUD настраиваются самим окном: размер считается из ответа, положение
- * запоминается при перетаскивании. Крутить руками остаётся только прозрачность.
+ * запоминается при перетаскивании. Крутить руками остаётся прозрачность и время показа ответа.
  */
 @Composable
 private fun OverlaySettings(state: AppState) {
@@ -80,6 +82,23 @@ private fun OverlaySettings(state: AppState) {
         )
         Spacer(Modifier.width(12.dp))
         Text("${(settings.hud.opacity * 100).roundToInt()} %", color = OverlayColors.Text, fontSize = 13.sp)
+    }
+
+    Spacer(Modifier.height(12.dp))
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Свернуть после ответа", modifier = Modifier.width(180.dp), color = OverlayColors.TextDim, fontSize = 13.sp)
+        Slider(
+            value = settings.hud.collapseSeconds.toFloat(),
+            onValueChange = { value ->
+                state.updateSettings { it.copy(hud = it.hud.copy(collapseSeconds = value.roundToInt())) }
+            },
+            valueRange = HudSettings.MIN_COLLAPSE_SECONDS.toFloat()..HudSettings.MAX_COLLAPSE_SECONDS.toFloat(),
+            steps = HudSettings.MAX_COLLAPSE_SECONDS - HudSettings.MIN_COLLAPSE_SECONDS - 1,
+            modifier = Modifier.width(260.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text("${settings.hud.collapseSeconds} с", color = OverlayColors.Text, fontSize = 13.sp)
     }
 }
 

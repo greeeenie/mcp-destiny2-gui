@@ -11,14 +11,12 @@ import kotlinx.coroutines.sync.withLock
 import org.example.overlay.audio.AudioDevices
 import org.example.overlay.audio.AudioLevelMeter
 import org.example.overlay.audio.JavaSoundAudioInput
-import org.example.overlay.audio.JavaSoundAudioOutput
 import org.example.overlay.audio.MicrophoneHub
 import org.example.overlay.audio.PcmAudioFormat
 import org.example.overlay.audio.WavEncoder
 import org.example.overlay.backend.BackendClient
 import org.example.overlay.backend.ChatStreamEvent
 import org.example.overlay.input.GlobalHotkey
-import org.example.overlay.ptt.JavaSoundActivationSignal
 import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
 
@@ -68,15 +66,6 @@ class VoiceRuntime(
             scope = scope,
             mixer = AudioDevices.resolve(current.audio.inputMixer, AudioDevices.inputs()),
         )
-        // Линия вывода нужна только для тонов открытия и закрытия микрофона.
-        val speaker = JavaSoundAudioOutput(
-            format = format,
-            scope = scope,
-            mixer = AudioDevices.resolve(current.audio.outputMixer, AudioDevices.outputs()),
-        )
-        runCatching { speaker.start() }
-        val signal = JavaSoundActivationSignal(speaker, format.sampleRate)
-
         val hub = MicrophoneHub(microphone, scope) { chunk ->
             onMicLevel(if (recording) AudioLevelMeter.level(chunk) else 0f)
             if (recording) {
@@ -94,20 +83,18 @@ class VoiceRuntime(
                     synchronized(recorded) { recorded.reset() }
                     recording = true
                     _phase.value = VoicePhase.LISTENING
-                    runCatching { signal.opened() }
                 }
             },
             onUp = {
                 if (recording) {
                     recording = false
-                    runCatching { signal.closed() }
                     onMicLevel(0f)
                     finishTurn()
                 }
             },
         )
 
-        parts = Parts(hub, hotkey, speaker)
+        parts = Parts(hub, hotkey)
         _ready.value = true
         log.info("Голосовой тракт готов: {} Гц, клавиша 0x{}", SAMPLE_RATE, current.pttKeyCode.toString(16))
     }
@@ -119,7 +106,6 @@ class VoiceRuntime(
         recording = false
         active.hotkey.stop()
         active.hub.stop()
-        runCatching { active.speaker.stop() }
         _phase.value = VoicePhase.IDLE
     }
 
@@ -163,7 +149,6 @@ class VoiceRuntime(
     private class Parts(
         val hub: MicrophoneHub,
         val hotkey: GlobalHotkey,
-        val speaker: JavaSoundAudioOutput,
     )
 
     private companion object {

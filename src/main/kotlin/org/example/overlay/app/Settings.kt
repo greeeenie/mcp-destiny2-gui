@@ -35,7 +35,15 @@ data class HudSettings(
     val y: Float? = null,
     val opacity: Float = 0.82f,
     val fontSize: Float = 13f,
-)
+    /** Через сколько секунд после ответа HUD сворачивается в пилюлю. Меньше [MIN_COLLAPSE_SECONDS] не даём. */
+    val collapseSeconds: Int = DEFAULT_COLLAPSE_SECONDS,
+) {
+    companion object {
+        const val MIN_COLLAPSE_SECONDS = 3
+        const val MAX_COLLAPSE_SECONDS = 30
+        const val DEFAULT_COLLAPSE_SECONDS = 6
+    }
+}
 
 /** `null` — «системное устройство по умолчанию» (риск 3). */
 data class AudioSettings(
