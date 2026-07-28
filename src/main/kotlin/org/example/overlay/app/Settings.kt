@@ -15,11 +15,6 @@ data class Settings(
     val chatModel: String? = null,
     /** Модель распознавания речи оттуда же. `null` — серверная по умолчанию. */
     val sttModel: String? = null,
-    /**
-     * Рисовать ответ в HUD. Озвучки нет, поэтому выключение делает ассистента немым —
-     * оставлено только для боя, где нужен один индикатор статуса.
-     */
-    val showAssistantText: Boolean = true,
     val rememberPassword: Boolean = false,
 ) {
     companion object {

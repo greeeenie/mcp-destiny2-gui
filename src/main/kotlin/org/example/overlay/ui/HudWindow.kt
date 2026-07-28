@@ -160,7 +160,7 @@ fun HudWindow(state: AppState) {
         position = WindowPosition(placement.x.dp, placement.y.dp),
     )
 
-    val answer = assistantTranscript.takeIf { settings.showAssistantText }.orEmpty()
+    val answer = assistantTranscript
     val blocks = remember(answer) { AnswerContent.parse(answer) }
 
     var hovered by remember { mutableStateOf(false) }

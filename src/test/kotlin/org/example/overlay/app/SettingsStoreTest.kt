@@ -23,7 +23,7 @@ class SettingsStoreTest {
             baseUrl = "https://example.test/api",
             hud = HudSettings(x = 120f, y = 40f, opacity = 0.55f),
             pttKeyCode = 0xA4,
-            showAssistantText = false,
+            sttModel = "stt-test",
         )
 
         store.save(settings)

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -99,15 +98,6 @@ fun VoiceScreen(state: AppState) {
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-        ToggleRow(
-            checked = settings.showAssistantText,
-            label = "Показывать ответ в HUD",
-            hint = "Выключи, если в бою нужен только индикатор статуса. Озвучки нет — с выключенным " +
-                "текстом ассистент замолчит совсем.",
-            onChange = { value -> state.updateSettings { it.copy(showAssistantText = value) } },
-        )
-
         message?.let {
             Spacer(Modifier.height(12.dp))
             Text(it, color = OverlayColors.Warn, fontSize = 13.sp)
@@ -157,13 +147,3 @@ private fun ModelSelector(
 private fun labelOf(options: List<VoiceModelOption>, default: String): String =
     options.firstOrNull { it.id == default }?.label ?: default
 
-@Composable
-private fun ToggleRow(checked: Boolean, label: String, hint: String, onChange: (Boolean) -> Unit) {
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = checked, onCheckedChange = onChange)
-            Text(label, color = OverlayColors.Text, fontSize = 13.sp)
-        }
-        Text(hint, color = OverlayColors.TextDim, fontSize = 11.sp, modifier = Modifier.padding(start = 48.dp))
-    }
-}
