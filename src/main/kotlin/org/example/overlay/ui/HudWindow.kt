@@ -169,7 +169,8 @@ fun HudWindow(state: AppState) {
     // Ход держит HUD развёрнутым сам по себе: игрок в этот момент смотрит на игру, а не на курсор.
     val turnActive = when (status) {
         OverlayStatus.Listening, OverlayStatus.Thinking, OverlayStatus.Answering,
-        OverlayStatus.Speaking, OverlayStatus.Connecting, is OverlayStatus.Reconnecting,
+        OverlayStatus.Speaking, OverlayStatus.Searching, OverlayStatus.Connecting,
+        is OverlayStatus.Reconnecting,
         -> true
 
         else -> false

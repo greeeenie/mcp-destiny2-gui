@@ -58,6 +58,9 @@ fun HudStatusIcon(status: OverlayStatus, modifier: Modifier = Modifier) {
         // Модель пишет ответ.
         OverlayStatus.Answering -> DotsIcon(OverlayColors.Accent, modifier = modifier)
         OverlayStatus.Speaking -> DotsIcon(OverlayColors.Accent, modifier = modifier)
+
+        // Модель гуглит: лупа объясняет, почему ответ дольше обычного.
+        OverlayStatus.Searching -> SearchingIcon(OverlayColors.Accent, modifier = modifier)
     }
 }
 
@@ -106,6 +109,28 @@ fun SpinnerIcon(color: Color, modifier: Modifier = Modifier) {
         val box = Size(18f * u, 18f * u)
         drawArc(color.copy(alpha = 0.25f), 0f, 360f, false, topLeft, box, style = line(u))
         drawArc(color, angle, SPINNER_SWEEP, false, topLeft, box, style = line(u))
+    }
+}
+
+/** Веб-поиск: лупа, по линзе бежит дуга — та же механика, что у спиннера. */
+@Composable
+fun SearchingIcon(color: Color, modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "searching")
+    val angle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 900, easing = LinearEasing)),
+        label = "searching-angle",
+    )
+
+    Canvas(modifier) {
+        val u = unit()
+        // Линза в левом верхнем квадранте, ручка уходит в правый нижний угол.
+        val topLeft = at(4f, 4f)
+        val box = Size(11f * u, 11f * u)
+        drawArc(color.copy(alpha = 0.25f), 0f, 360f, false, topLeft, box, style = line(u))
+        drawArc(color, angle, SPINNER_SWEEP, false, topLeft, box, style = line(u))
+        drawLine(color, at(14.2f, 14.2f), at(20.5f, 20.5f), strokeWidth = STROKE_UNITS * u, cap = StrokeCap.Round)
     }
 }
 
