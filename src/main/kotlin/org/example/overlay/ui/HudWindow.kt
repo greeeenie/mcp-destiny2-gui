@@ -67,6 +67,7 @@ import org.example.overlay.app.ToolLogEntry
 import org.example.overlay.markdown.AnswerContent
 import org.example.overlay.markdown.MdBlock
 import org.example.overlay.platform.ScreenPlacement
+import java.awt.geom.Rectangle2D
 import kotlin.math.max
 import kotlin.math.min
 
@@ -336,6 +337,25 @@ fun HudWindow(state: AppState) {
             windowState.position = WindowPosition(restX.dp, restY.dp)
             windowState.size = DpSize(restW.dp, restH.dp)
             animating = false
+        }
+
+        // Хит-бокс окна повторяет видимую панель. Окно в покое всегда размером с полосу,
+        // и без формы его прозрачная часть перехватывала бы клики по игре и по чужим окнам
+        // рядом с пилюлей. Вне формы Windows пропускает клики насквозь, поэтому в пилюльном
+        // покое кликабелен только квадрат пилюли в якорном углу. Форма прямоугольная,
+        // а не скруглённая: регион режется без сглаживания и грубые углы уже обжигали.
+        LaunchedEffect(animating, showPill, anchors, windowState.size) {
+            window.shape = if (showPill && !animating) {
+                val pill = HudSizing.COLLAPSED.toDouble()
+                Rectangle2D.Double(
+                    if (anchors.end) windowState.size.width.value - pill else 0.0,
+                    if (anchors.bottom) windowState.size.height.value - pill else 0.0,
+                    pill,
+                    pill,
+                )
+            } else {
+                null
+            }
         }
 
         OverlayTheme {
