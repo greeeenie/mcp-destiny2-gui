@@ -403,7 +403,11 @@ class AppState(
     }
 
     fun appendToolLog(entry: ToolLogEntry) {
-        _toolLog.update { (it + entry).takeLast(MAX_TOOL_LOG) }
+        _toolLog.update { log ->
+            // Поиск обновляется на месте: «ищу…» сменяется итогом, а не копится строками.
+            val base = if (entry.isWebSearch) log.filterNot { it.isWebSearch } else log
+            (base + entry).takeLast(MAX_TOOL_LOG)
+        }
     }
 
     private suspend fun performLogin(username: String, password: String, rememberPassword: Boolean) {

@@ -665,6 +665,25 @@ private fun AuthBanner(url: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
 
 @Composable
 private fun ToolLine(entry: ToolLogEntry) {
+    // Поиск — особая строка: игрок должен видеть, что модель ушла в интернет и потому молчит.
+    if (entry.isWebSearch) {
+        Text(
+            text = when {
+                entry.isRunning -> "🌐 Ищу в интернете…"
+                entry.isFailure -> "🌐 Поиск в интернете не удался"
+                else -> "🌐 Ответ найден в интернете"
+            },
+            color = when {
+                entry.isRunning -> OverlayColors.Accent
+                entry.isFailure -> OverlayColors.Error
+                else -> OverlayColors.TextDim
+            },
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        return
+    }
     Text(
         text = "${entry.name} → ${entry.status} (${entry.durationMs} мс)",
         color = if (entry.isFailure) OverlayColors.Error else OverlayColors.TextDim,
