@@ -79,11 +79,14 @@ class BackendClient(
     }
 
     /** Речь в текст. Аудио уходит WAV в base64: кодек сервер определяет сам. */
-    suspend fun transcribe(token: String, wav: ByteArray, model: String? = null): String {
+    suspend fun transcribe(token: String, wav: ByteArray, model: String? = null, language: String? = null): String {
         val body = mapper.writeValueAsString(
             mapper.createObjectNode()
                 .put("audioBase64", Base64.getEncoder().encodeToString(wav))
-                .apply { model?.let { put("model", it) } },
+                .apply {
+                    model?.let { put("model", it) }
+                    language?.let { put("language", it) }
+                },
         )
         val response = post("/voice/transcribe", body, token, TRANSCRIBE_TIMEOUT).requireSuccess()
         return mapper.readTree(response.body()).path("text").asString().trim()

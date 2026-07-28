@@ -83,6 +83,8 @@ fun VoiceScreen(state: AppState) {
                 options = available.options,
                 default = available.default,
                 current = settings.chatModel,
+                hint = "Действует со следующего вопроса. ${labelOf(available.options, available.default)} — " +
+                    "серверная по умолчанию.",
                 onSelect = { choice -> state.updateSettings { it.copy(chatModel = choice) } },
             )
             // Пустой список — сервер без селектора STT: блок тогда не показываем вовсе.
@@ -93,10 +95,22 @@ fun VoiceScreen(state: AppState) {
                     options = available.sttOptions,
                     default = available.sttDefault,
                     current = settings.sttModel,
+                    hint = "Действует со следующей фразы. ${labelOf(available.sttOptions, available.sttDefault)} — " +
+                        "серверная по умолчанию.",
                     onSelect = { choice -> state.updateSettings { it.copy(sttModel = choice) } },
                 )
             }
         }
+
+        Spacer(Modifier.height(16.dp))
+        ModelSelector(
+            title = "Язык распознавания",
+            options = STT_LANGUAGES,
+            default = STT_LANGUAGE_AUTO,
+            current = settings.sttLanguage,
+            hint = "Авто позволяет мешать русский и английский в одной фразе; явный язык — если авто ошибается.",
+            onSelect = { choice -> state.updateSettings { it.copy(sttLanguage = choice) } },
+        )
 
         message?.let {
             Spacer(Modifier.height(12.dp))
@@ -113,6 +127,7 @@ private fun ModelSelector(
     options: List<VoiceModelOption>,
     default: String,
     current: String?,
+    hint: String,
     onSelect: (String?) -> Unit,
 ) {
     Column {
@@ -136,13 +151,18 @@ private fun ModelSelector(
             }
         }
         Spacer(Modifier.height(4.dp))
-        Text(
-            "Действует со следующего вопроса. ${labelOf(options, default)} — серверная по умолчанию.",
-            color = OverlayColors.TextDim,
-            fontSize = 11.sp,
-        )
+        Text(hint, color = OverlayColors.TextDim, fontSize = 11.sp)
     }
 }
+
+/** Локальный список: серверу уходит код ISO 639-1, «auto» означает «язык не передавать». */
+private const val STT_LANGUAGE_AUTO = "auto"
+
+private val STT_LANGUAGES = listOf(
+    VoiceModelOption(id = STT_LANGUAGE_AUTO, label = "Авто"),
+    VoiceModelOption(id = "ru", label = "Русский"),
+    VoiceModelOption(id = "en", label = "English"),
+)
 
 private fun labelOf(options: List<VoiceModelOption>, default: String): String =
     options.firstOrNull { it.id == default }?.label ?: default

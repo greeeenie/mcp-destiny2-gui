@@ -127,7 +127,12 @@ class VoiceRuntime(
         turnJob = scope.launch {
             try {
                 val token = tokenProvider() ?: error("Нет сессии бэкенда — нужен вход")
-                val text = backend.transcribe(token, WavEncoder.encode(pcm, SAMPLE_RATE), settings.current.sttModel)
+                val text = backend.transcribe(
+                    token,
+                    WavEncoder.encode(pcm, SAMPLE_RATE),
+                    settings.current.sttModel,
+                    settings.current.sttLanguage,
+                )
                 if (text.isBlank()) {
                     _phase.value = VoicePhase.IDLE
                     return@launch

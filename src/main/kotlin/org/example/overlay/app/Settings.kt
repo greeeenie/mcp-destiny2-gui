@@ -15,6 +15,8 @@ data class Settings(
     val chatModel: String? = null,
     /** Модель распознавания речи оттуда же. `null` — серверная по умолчанию. */
     val sttModel: String? = null,
+    /** Язык распознавания: `ru` или `en`. `null` — авто: сервер не передаёт язык в Inworld. */
+    val sttLanguage: String? = null,
     val rememberPassword: Boolean = false,
 ) {
     companion object {
