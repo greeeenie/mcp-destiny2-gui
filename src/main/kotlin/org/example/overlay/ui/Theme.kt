@@ -41,7 +41,6 @@ fun OverlayStatus.dotColor(): Color = when (this) {
     OverlayStatus.Thinking -> OverlayColors.Accent
     OverlayStatus.Speaking -> OverlayColors.Accent
     OverlayStatus.Answering -> OverlayColors.Accent
-    OverlayStatus.Searching -> OverlayColors.Accent
     is OverlayStatus.Reconnecting -> OverlayColors.Warn
     is OverlayStatus.Failed -> OverlayColors.Error
 }
