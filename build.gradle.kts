@@ -9,7 +9,7 @@ plugins {
 group = "org.example.overlay"
 // Единственный источник версии: она же уходит в MSI (packageVersion) и в version.properties,
 // по которому приложение узнаёт себя и сверяется с последним релизом на GitHub.
-version = "1.0.4"
+version = "1.0.5"
 
 kotlin {
     jvmToolchain(21)
@@ -58,12 +58,15 @@ compose.desktop {
             // на java.net.http — без него установленное приложение умирало на старте
             // с «Failed to launch JVM». Список — из задачи suggestRuntimeModules.
             modules("java.instrument", "java.net.http", "java.sql", "jdk.unsupported")
-            packageName = "mcp-destiny2-gui"
+            // Имя пакета — витрина: MSI-файл, заголовок установщика, папка в Program Files
+            // и ярлык. Данные приложения живут отдельно (AppPaths, %LOCALAPPDATA%\mcp-destiny2-gui)
+            // и переименованием не задеваются, апгрейд держится на upgradeUuid, а не на имени.
+            packageName = "Destiny 2 Assistant"
             packageVersion = version.toString()
             vendor = "greenie"
             // Только латиница: WiX кодирует строки установщика в кодовой странице культуры
             // (en-us), и кириллица валит сборку .msi с LGHT0311.
-            description = "Voice overlay for Destiny 2"
+            description = "Voice assistant overlay for Destiny 2"
 
             windows {
                 // Фиксированный UUID: без него каждая сборка ставится как новый продукт.
