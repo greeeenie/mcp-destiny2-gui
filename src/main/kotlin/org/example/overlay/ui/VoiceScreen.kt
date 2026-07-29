@@ -30,9 +30,7 @@ import org.example.overlay.input.VirtualKeys
 @Composable
 fun VoiceScreen(state: AppState) {
     val settings by state.settings.collectAsState()
-    val enabled by state.voiceEnabled.collectAsState()
     val message by state.voiceMessage.collectAsState()
-    val status by state.status.collectAsState()
     val models by state.chatModels.collectAsState()
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -42,12 +40,6 @@ fun VoiceScreen(state: AppState) {
             Button(onClick = { state.restartVoice() }) { Text("Переоткрыть микрофон") }
             // Сброс контекста: модель начнёт имитировать не свои прошлые ответы, а промпт.
             OutlinedButton(onClick = { state.clearConversation() }) { Text("Сбросить историю") }
-            Text(
-                text = if (enabled) "микрофон готов" else "микрофон не поднялся",
-                color = if (enabled) OverlayColors.Ok else OverlayColors.Error,
-                fontSize = 13.sp,
-            )
-            Text(status.label, color = status.dotColor(), fontSize = 13.sp)
         }
 
         Spacer(Modifier.height(16.dp))
@@ -70,13 +62,6 @@ fun VoiceScreen(state: AppState) {
                 )
             }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Клавиша меняется на лету. Right Alt в Destiny 2 по умолчанию не занят.",
-            color = OverlayColors.TextDim,
-            fontSize = 11.sp,
-        )
-
         models?.let { available ->
             Spacer(Modifier.height(16.dp))
             ModelSelector(
@@ -84,24 +69,9 @@ fun VoiceScreen(state: AppState) {
                 options = available.options,
                 default = available.default,
                 current = settings.chatModel,
-                hint = "Действует со следующего вопроса. ${labelOf(available.options, available.default)} — " +
-                    "серверная по умолчанию.",
                 onSelect = { choice -> state.updateSettings { it.copy(chatModel = choice) } },
             )
             WebSearchIndicator(available, settings.chatModel)
-            // Пустой список — сервер без селектора STT: блок тогда не показываем вовсе.
-            if (available.sttOptions.isNotEmpty()) {
-                Spacer(Modifier.height(16.dp))
-                ModelSelector(
-                    title = "Модель распознавания речи",
-                    options = available.sttOptions,
-                    default = available.sttDefault,
-                    current = settings.sttModel,
-                    hint = "Действует со следующей фразы. ${labelOf(available.sttOptions, available.sttDefault)} — " +
-                        "серверная по умолчанию.",
-                    onSelect = { choice -> state.updateSettings { it.copy(sttModel = choice) } },
-                )
-            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -129,8 +99,8 @@ private fun ModelSelector(
     options: List<VoiceModelOption>,
     default: String,
     current: String?,
-    hint: String,
     onSelect: (String?) -> Unit,
+    hint: String? = null,
 ) {
     Column {
         Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = OverlayColors.Text)
@@ -152,8 +122,10 @@ private fun ModelSelector(
                 )
             }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(hint, color = OverlayColors.TextDim, fontSize = 11.sp)
+        hint?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, color = OverlayColors.TextDim, fontSize = 11.sp)
+        }
     }
 }
 
@@ -164,21 +136,11 @@ private fun ModelSelector(
 @Composable
 private fun WebSearchIndicator(models: VoiceModels, chatModel: String?) {
     val selected = models.options.firstOrNull { it.id == (chatModel ?: models.default) }
-    val searchCapable = models.options.filter { it.webSearch }
     Spacer(Modifier.height(4.dp))
     if (selected?.webSearch == true) {
-        Text(
-            "Веб-поиск включён: модель ищет мету, патчи и новости в интернете.",
-            color = OverlayColors.Ok,
-            fontSize = 11.sp,
-        )
+        Text("Веб-поиск включён", color = OverlayColors.Ok, fontSize = 11.sp)
     } else {
-        val capableNote = searchCapable
-            .takeIf { it.isNotEmpty() }
-            ?.joinToString { it.label }
-            ?.let { " Он есть у: $it." }
-            .orEmpty()
-        Text("Веб-поиск выключен — модель без него.$capableNote", color = OverlayColors.TextDim, fontSize = 11.sp)
+        Text("Веб-поиск выключен", color = OverlayColors.TextDim, fontSize = 11.sp)
     }
 }
 
@@ -190,7 +152,4 @@ private val STT_LANGUAGES = listOf(
     VoiceModelOption(id = "ru", label = "Русский"),
     VoiceModelOption(id = "en", label = "English"),
 )
-
-private fun labelOf(options: List<VoiceModelOption>, default: String): String =
-    options.firstOrNull { it.id == default }?.label ?: default
 
