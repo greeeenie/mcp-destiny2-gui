@@ -187,7 +187,7 @@ fun HudWindow(state: AppState) {
     Window(
         onCloseRequest = { /* HUD не закрывается: выход — через трей */ },
         state = windowState,
-        title = "mcp-destiny2 overlay",
+        title = "Destiny 2 Assistant",
         icon = painterResource("icons/app-icon.png"),
         undecorated = true,
         transparent = true,

@@ -44,7 +44,7 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
 
     Window(
         onCloseRequest = onClose,
-        title = "mcp-destiny2 — консоль",
+        title = "Destiny 2 Assistant — консоль",
         icon = painterResource("icons/app-icon.png"),
         state = rememberWindowState(width = 900.dp, height = 620.dp),
     ) {

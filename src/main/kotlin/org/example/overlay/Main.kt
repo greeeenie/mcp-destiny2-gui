@@ -59,7 +59,7 @@ fun main() {
 
         Tray(
             icon = painterResource("icons/app-icon.png"),
-            tooltip = "mcp-destiny2 overlay",
+            tooltip = "Destiny 2 Assistant",
             onAction = { state.toggleConsole() },
             menu = {
                 Item("Консоль", onClick = { state.setConsoleVisible(true) })
