@@ -1,17 +1,21 @@
 package org.example.overlay.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -20,18 +24,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.rememberWindowState
 import org.example.overlay.app.AppState
 import org.example.overlay.app.HudSettings
+import org.example.overlay.update.AppVersion
+import org.example.overlay.update.UpdateState
 import kotlin.math.roundToInt
 
 /** Обычное фокусируемое окно: аккаунт, голос, звук, оверлей (§5.3). */
 @Composable
 fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
+    val updateState by state.updateState.collectAsState()
 
     Window(
         onCloseRequest = onClose,
@@ -41,6 +49,7 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
         OverlayTheme {
             Surface(modifier = Modifier.fillMaxSize()) {
                 Column(modifier = Modifier.fillMaxSize()) {
+                    UpdateBanner(updateState, onInstall = state::installUpdate)
                     PrimaryTabRow(selectedTabIndex = tab) {
                         TABS.forEachIndexed { index, title ->
                             Tab(
@@ -60,6 +69,68 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Полоса обновления над вкладками. Пока обновления нет, её не существует вовсе: консоль
+ * выглядит как раньше. Установка — только по клику, поэтому вся полоса и есть приглашение.
+ */
+@Composable
+private fun UpdateBanner(state: UpdateState, onInstall: () -> Unit) {
+    if (state is UpdateState.Hidden) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(OverlayColors.Surface)
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when (state) {
+            is UpdateState.Available -> {
+                Text(
+                    "Доступно обновление ${state.update.version} — у тебя ${AppVersion.current}",
+                    color = OverlayColors.Text,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onInstall) {
+                    Text("Скачать и установить", color = OverlayColors.Accent, fontSize = 13.sp)
+                }
+            }
+
+            is UpdateState.Downloading -> {
+                Text("Скачиваю ${state.update.version}…", color = OverlayColors.Text, fontSize = 13.sp)
+                Spacer(Modifier.width(12.dp))
+                LinearProgressIndicator(
+                    progress = { state.progress },
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(12.dp))
+                Text("${(state.progress * 100).roundToInt()} %", color = OverlayColors.TextDim, fontSize = 13.sp)
+            }
+
+            is UpdateState.Installing -> Text(
+                "Установщик запущен — приложение сейчас закроется, после установки запусти его снова.",
+                color = OverlayColors.Ok,
+                fontSize = 13.sp,
+            )
+
+            is UpdateState.Failed -> {
+                Text(
+                    "Обновление не установилось: ${state.message}",
+                    color = OverlayColors.Error,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onInstall) {
+                    Text("Повторить", color = OverlayColors.Accent, fontSize = 13.sp)
+                }
+            }
+
+            UpdateState.Hidden -> Unit
         }
     }
 }

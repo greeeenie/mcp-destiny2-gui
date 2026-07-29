@@ -26,6 +26,8 @@ import org.example.overlay.backend.UnauthorizedException
 import org.example.overlay.backend.VoiceModels
 import org.example.overlay.platform.BrowserLauncher
 import org.example.overlay.tools.ToolResult
+import org.example.overlay.update.UpdateManager
+import org.example.overlay.update.UpdateState
 import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -38,6 +40,7 @@ class AppState(
     private val settingsHolder: SettingsHolder,
     private val sessionStore: SessionStore,
     private val backend: BackendClient,
+    private val updates: UpdateManager,
     private val scope: CoroutineScope,
 ) {
     val settings: StateFlow<Settings> = settingsHolder.settings
@@ -53,7 +56,6 @@ class AppState(
         tokenProvider = { _session.value?.token },
         onUserText = { text ->
             _userTranscript.value = text
-            _webSearching.value = false
             _assistantTranscript.value = assistantBuffer.clear()
             // Журнал инструментов и строка ошибки относятся к ходу: с прошлого хода в HUD
             // висели чужие строки, а сообщение само не гаснет.
@@ -69,9 +71,6 @@ class AppState(
 
     private val _status = MutableStateFlow<OverlayStatus>(OverlayStatus.Disconnected)
     val status: StateFlow<OverlayStatus> = _status.asStateFlow()
-
-    /** Модель сейчас в веб-поиске: RUNNING от сервера включает, итог или новый ход гасят. */
-    private val _webSearching = MutableStateFlow(false)
 
     private val _consoleVisible = MutableStateFlow(false)
     val consoleVisible: StateFlow<Boolean> = _consoleVisible.asStateFlow()
@@ -123,6 +122,10 @@ class AppState(
 
     private var authPollJob: Job? = null
 
+    /** Автообновление: баннер в консоли, бейдж на пилюле, выход перед установкой. */
+    val updateState: StateFlow<UpdateState> = updates.state
+    val updateInstallStarted: StateFlow<Boolean> = updates.installStarted
+
     private val assistantBuffer = TranscriptBuffer()
 
     /** Курсор над HUD: отсчёт сворачивания стоит на месте и сброшен на старт. */
@@ -147,8 +150,9 @@ class AppState(
         // Микрофон и клавиша поднимаются сразу: соединения это не открывает, а «включать голос»
         // руками игроку незачем.
         startVoice()
+        updates.start()
         scope.launch {
-            combine(voice.phase, voice.ready, _webSearching, ::resolveStatus).collect { _status.value = it }
+            combine(voice.phase, voice.ready, ::resolveStatus).collect { _status.value = it }
         }
         scope.launch { runCollapseCountdown() }
     }
@@ -204,6 +208,8 @@ class AppState(
     fun setHudHovered(hovered: Boolean) {
         _hudHovered.value = hovered
     }
+
+    fun installUpdate() = updates.install()
 
     /** Убрать с экрана прошедший ход. Только лента HUD: серверная история не трогается. */
     private fun clearHudFeed() {
@@ -261,37 +267,19 @@ class AppState(
     private fun onChatEvent(event: ChatStreamEvent) {
         when (event) {
             is ChatStreamEvent.Delta -> _assistantTranscript.value = assistantBuffer.accept(event.text, false)
-            is ChatStreamEvent.Done -> {
-                _webSearching.value = false
-                if (event.text.isNotBlank()) {
-                    _assistantTranscript.value = assistantBuffer.accept(event.text, true)
-                }
+            is ChatStreamEvent.Done -> if (event.text.isNotBlank()) {
+                _assistantTranscript.value = assistantBuffer.accept(event.text, true)
             }
 
-            is ChatStreamEvent.Tool -> {
-                val entry = ToolLogEntry(event.name, event.status, event.durationMs)
-                if (entry.isWebSearch) {
-                    // Идущий поиск показывает анимированная иконка статуса, а не лента:
-                    // в лог попадает только итог.
-                    _webSearching.value = entry.isRunning
-                    if (!entry.isRunning) appendToolLog(entry)
-                } else {
-                    appendToolLog(entry)
-                }
-            }
-
-            is ChatStreamEvent.Failed -> {
-                _webSearching.value = false
-                _voiceMessage.value = event.message
-            }
+            is ChatStreamEvent.Tool -> appendToolLog(ToolLogEntry(event.name, event.status, event.durationMs))
+            is ChatStreamEvent.Failed -> _voiceMessage.value = event.message
         }
     }
 
-    private fun resolveStatus(phase: VoicePhase, ready: Boolean, webSearching: Boolean): OverlayStatus = when {
+    private fun resolveStatus(phase: VoicePhase, ready: Boolean): OverlayStatus = when {
         !ready -> OverlayStatus.Disconnected
         phase == VoicePhase.LISTENING -> OverlayStatus.Listening
         phase == VoicePhase.TRANSCRIBING -> OverlayStatus.Thinking
-        phase == VoicePhase.ANSWERING && webSearching -> OverlayStatus.Searching
         phase == VoicePhase.ANSWERING -> OverlayStatus.Answering
         else -> OverlayStatus.Ready
     }

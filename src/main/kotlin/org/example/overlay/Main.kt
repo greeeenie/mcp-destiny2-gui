@@ -1,5 +1,6 @@
 package org.example.overlay
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.window.Tray
@@ -17,6 +18,7 @@ import org.example.overlay.backend.SessionStore
 import org.example.overlay.ui.ConsoleWindow
 import org.example.overlay.ui.HudWindow
 import org.example.overlay.ui.TrayIconPainter
+import org.example.overlay.update.UpdateManager
 
 /**
  * Сборка графа руками, без DI-фреймворка (§2 плана). Потоков ровно два семейства:
@@ -31,11 +33,13 @@ fun main() {
     // Адрес бэкенда читается на каждый запрос: его можно поменять в консоли без перезапуска.
     val backend = BackendClient(baseUrl = { settingsHolder.current.baseUrl }, http = httpClient)
     val sessionStore = SessionStore(paths.sessionFile)
+    val updates = UpdateManager(scope = appScope, http = httpClient, mapper = BackendClient.MAPPER)
 
     val state = AppState(
         settingsHolder = settingsHolder,
         sessionStore = sessionStore,
         backend = backend,
+        updates = updates,
         scope = appScope,
     )
 
@@ -45,6 +49,13 @@ fun main() {
 
     application {
         val consoleVisible by state.consoleVisible.collectAsState()
+        val installStarted by state.updateInstallStarted.collectAsState()
+
+        // Установщик обновления запущен — уходим: MSI не заменит файлы работающего процесса.
+        // Настройки допишутся штатно, как при любом выходе (см. flushSettings ниже).
+        LaunchedEffect(installStarted) {
+            if (installStarted) exitApplication()
+        }
 
         Tray(
             icon = TrayIconPainter,

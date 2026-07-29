@@ -7,7 +7,9 @@ plugins {
 }
 
 group = "org.example.overlay"
-version = "0.1.0"
+// Единственный источник версии: она же уходит в MSI (packageVersion) и в version.properties,
+// по которому приложение узнаёт себя и сверяется с последним релизом на GitHub.
+version = "1.0.1"
 
 kotlin {
     jvmToolchain(21)
@@ -41,6 +43,11 @@ tasks.test {
     useJUnitPlatform()
 }
 
+tasks.processResources {
+    inputs.property("version", version.toString())
+    filesMatching("version.properties") { expand("version" to version.toString()) }
+}
+
 compose.desktop {
     application {
         mainClass = "org.example.overlay.MainKt"
@@ -52,7 +59,7 @@ compose.desktop {
             // с «Failed to launch JVM». Список — из задачи suggestRuntimeModules.
             modules("java.instrument", "java.net.http", "java.sql", "jdk.unsupported")
             packageName = "mcp-destiny2-gui"
-            packageVersion = "1.0.0"
+            packageVersion = version.toString()
             vendor = "greenie"
             // Только латиница: WiX кодирует строки установщика в кодовой странице культуры
             // (en-us), и кириллица валит сборку .msi с LGHT0311.

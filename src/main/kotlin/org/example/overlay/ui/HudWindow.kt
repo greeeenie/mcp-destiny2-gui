@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.window.WindowDraggableArea
@@ -67,6 +68,7 @@ import org.example.overlay.app.ToolLogEntry
 import org.example.overlay.markdown.AnswerContent
 import org.example.overlay.markdown.MdBlock
 import org.example.overlay.platform.ScreenPlacement
+import org.example.overlay.update.UpdateState
 import java.awt.geom.Rectangle2D
 import kotlin.math.max
 import kotlin.math.min
@@ -150,6 +152,7 @@ fun HudWindow(state: AppState) {
     val voiceMessage by state.voiceMessage.collectAsState()
     val collapseFraction by state.collapseFraction.collectAsState()
     val dismissed by state.hudDismissed.collectAsState()
+    val updateState by state.updateState.collectAsState()
 
     // Окно сразу размером с полосу: пилюля живёт в его углу, а не в отдельном мелком окне.
     val placement = remember {
@@ -169,8 +172,7 @@ fun HudWindow(state: AppState) {
     // Ход держит HUD развёрнутым сам по себе: игрок в этот момент смотрит на игру, а не на курсор.
     val turnActive = when (status) {
         OverlayStatus.Listening, OverlayStatus.Thinking, OverlayStatus.Answering,
-        OverlayStatus.Speaking, OverlayStatus.Searching, OverlayStatus.Connecting,
-        is OverlayStatus.Reconnecting,
+        OverlayStatus.Speaking, OverlayStatus.Connecting, is OverlayStatus.Reconnecting,
         -> true
 
         else -> false
@@ -469,6 +471,19 @@ fun HudWindow(state: AppState) {
                                 }
                             }
                         }
+
+                        // Бейдж обновления: пока консоль закрыта, пилюля — единственное место,
+                        // где игрок вообще может узнать про новую версию. Ставится/качается —
+                        // само обновление живёт в консоли, точка лишь зовёт её открыть.
+                        if (showPill && updateState !is UpdateState.Hidden) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(7.dp)
+                                    .size(7.dp)
+                                    .background(OverlayColors.Accent, CircleShape),
+                            )
+                        }
                     }
                 }
             }
@@ -666,19 +681,11 @@ private fun AuthBanner(url: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
 
 @Composable
 private fun ToolLine(entry: ToolLogEntry) {
-    // Поиск — особая строка: игрок должен видеть, что модель ушла в интернет и потому молчит.
+    // Поиск — особая строка: после ответа игрок видит, что данные пришли из интернета.
     if (entry.isWebSearch) {
         Text(
-            text = when {
-                entry.isRunning -> "🌐 Ищу в интернете…"
-                entry.isFailure -> "🌐 Поиск в интернете не удался"
-                else -> "🌐 Ответ найден в интернете"
-            },
-            color = when {
-                entry.isRunning -> OverlayColors.Accent
-                entry.isFailure -> OverlayColors.Error
-                else -> OverlayColors.TextDim
-            },
+            text = "🌐 Ответ найден в интернете",
+            color = OverlayColors.TextDim,
             fontSize = 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
