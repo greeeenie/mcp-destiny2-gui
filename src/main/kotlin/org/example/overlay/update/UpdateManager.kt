@@ -17,7 +17,7 @@ import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
-import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 /** Что показывать про обновление. [Hidden] — обновления нет или ещё не искали: в UI пусто. */
@@ -152,7 +152,10 @@ class UpdateManager(
         val log = LoggerFactory.getLogger(UpdateManager::class.java)
         const val LATEST_RELEASE_URL = "https://api.github.com/repos/greeeenie/mcp-destiny2-gui/releases/latest"
         val FIRST_CHECK_DELAY = 10.seconds
-        val CHECK_INTERVAL = 6.hours
+
+        /** Обнова доезжает за минуты, не за перезапуск. GitHub без токена даёт 60 запросов
+         * в час с адреса — 12 проверок в час укладываются с запасом. */
+        val CHECK_INTERVAL = 5.minutes
         val CHECK_TIMEOUT: Duration = Duration.ofSeconds(20)
 
         /** MSI весит ~76 МБ: на медленном канале это минуты, а не секунды. */
