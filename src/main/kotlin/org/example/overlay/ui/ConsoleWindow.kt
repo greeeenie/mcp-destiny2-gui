@@ -97,7 +97,7 @@ private fun UpdateBanner(state: UpdateState, onInstall: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onInstall) {
-                    Text("Скачать и установить", color = OverlayColors.Accent, fontSize = 13.sp)
+                    Text("Установить и перезапустить", color = OverlayColors.Accent, fontSize = 13.sp)
                 }
             }
 
@@ -113,7 +113,7 @@ private fun UpdateBanner(state: UpdateState, onInstall: () -> Unit) {
             }
 
             is UpdateState.Installing -> Text(
-                "Установщик запущен — приложение сейчас закроется, после установки запусти его снова.",
+                "Установщик запущен — приложение закроется и перезапустится само после обновления.",
                 color = OverlayColors.Ok,
                 fontSize = 13.sp,
             )

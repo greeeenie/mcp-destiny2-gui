@@ -14,6 +14,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -145,7 +146,29 @@ class UpdateManager(
     private fun launchInstaller(msi: Path) {
         // /passive — прогресс без вопросов (UAC система покажет всё равно). Установщик стартует,
         // приложение закрывается: пока он дойдёт до замены файлов, процесса уже нет.
-        ProcessBuilder("msiexec", "/i", msi.toAbsolutePath().toString(), "/passive", "/norestart").start()
+        val msiPath = msi.toAbsolutePath().toString()
+        // Путь к своему exe лаунчер jpackage кладёт в системное свойство. Он переживает
+        // обновление: MSI ставится в ту же папку. В dev-запуске свойства нет — перезапускать
+        // нечего, установщик просто отрабатывает сам по себе.
+        val exePath = System.getProperty("jpackage.app-path")
+        if (exePath == null) {
+            ProcessBuilder("msiexec", "/i", msiPath, "/passive", "/norestart").start()
+            return
+        }
+        // Перезапуск делает «провожатый» — процесс wscript, который переживает и приложение,
+        // и установку: дожидается msiexec (третий аргумент Run — True) и поднимает
+        // свежепоставленный exe. VBS вместо cmd, чтобы на экране не мигало консольное окно.
+        // Если установка сорвалась (игрок закрыл UAC), поднимется прежняя версия — путь тот же.
+        val script = listOf(
+            "Set sh = CreateObject(\"WScript.Shell\")",
+            "sh.Run \"msiexec /i \"\"$msiPath\"\" /passive /norestart\", 1, True",
+            "sh.Run \"\"\"$exePath\"\"\", 1, False",
+        ).joinToString("\r\n")
+        val vbs = msi.resolveSibling("update-and-restart.vbs")
+        // UTF-16 LE с BOM (байты FF FE): без него wscript читает файл в ANSI,
+        // и кириллица в путях ломает скрипт.
+        Files.write(vbs, byteArrayOf(-1, -2) + script.toByteArray(StandardCharsets.UTF_16LE))
+        ProcessBuilder("wscript", "//B", vbs.toString()).start()
     }
 
     private companion object {
