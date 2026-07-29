@@ -3,6 +3,7 @@ package org.example.overlay
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.application
 import kotlinx.coroutines.CoroutineScope
@@ -17,7 +18,6 @@ import org.example.overlay.backend.BackendClient
 import org.example.overlay.backend.SessionStore
 import org.example.overlay.ui.ConsoleWindow
 import org.example.overlay.ui.HudWindow
-import org.example.overlay.ui.TrayIconPainter
 import org.example.overlay.update.UpdateManager
 
 /**
@@ -58,7 +58,7 @@ fun main() {
         }
 
         Tray(
-            icon = TrayIconPainter,
+            icon = painterResource("icons/app-icon.png"),
             tooltip = "mcp-destiny2 overlay",
             onAction = { state.toggleConsole() },
             menu = {

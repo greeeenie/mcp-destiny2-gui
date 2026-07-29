@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,6 +45,7 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
     Window(
         onCloseRequest = onClose,
         title = "mcp-destiny2 — консоль",
+        icon = painterResource("icons/app-icon.png"),
         state = rememberWindowState(width = 900.dp, height = 620.dp),
     ) {
         OverlayTheme {

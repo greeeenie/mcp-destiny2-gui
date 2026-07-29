@@ -49,6 +49,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -187,6 +188,7 @@ fun HudWindow(state: AppState) {
         onCloseRequest = { /* HUD не закрывается: выход — через трей */ },
         state = windowState,
         title = "mcp-destiny2 overlay",
+        icon = painterResource("icons/app-icon.png"),
         undecorated = true,
         transparent = true,
         // Размер задаёт только сам HUD: ручное растягивание за края ломало бы механику

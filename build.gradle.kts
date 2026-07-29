@@ -68,6 +68,7 @@ compose.desktop {
             windows {
                 // Фиксированный UUID: без него каждая сборка ставится как новый продукт.
                 upgradeUuid = "6f1b0a54-6d1e-4b23-9a2f-8f0d3c7b1e42"
+                iconFile.set(project.file("icons/app.ico"))
                 menu = true
                 shortcut = true
                 console = false
