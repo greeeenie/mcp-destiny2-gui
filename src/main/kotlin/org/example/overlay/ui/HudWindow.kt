@@ -249,18 +249,30 @@ fun HudWindow(state: AppState) {
             mutableStateOf(ScreenPlacement.anchors(placement.x, placement.y, HudSizing.MIN_WIDTH, HudSizing.MIN_HEIGHT))
         }
 
+        // Кэш формы окна: SetWindowRgn — не бесплатный и на видимом слоистом окне даёт
+        // вспышку, поэтому регион ставится только когда он действительно изменился.
+        var appliedShape by remember { mutableStateOf<Rectangle2D?>(null) }
+        fun applyShape(shape: Rectangle2D?) {
+            if (shape != appliedShape) {
+                window.shape = shape
+                appliedShape = shape
+            }
+        }
+
         LaunchedEffect(expanded, targetWidth, targetHeight, turnActive) {
             val position = windowState.position as? WindowPosition.Absolute ?: return@LaunchedEffect
             val size = windowState.size
 
             // Окно покоя и хит-бокс. Обычно окно покоя — сама панель, но не меньше полосы,
             // чтобы разворот пилюли в полосу обходился без изменения границ. Во время хода
-            // окно встаёт кожухом сразу максимального размера: растущий ответ больше не
-            // трогает границы, а кликабельную область сужает форма окна до видимой панели —
-            // вне формы Windows пропускает клики насквозь. Форма прямоугольная, а не
-            // скруглённая: регион режется без сглаживания и грубые углы уже обжигали.
+            // окно встаёт кожухом на всю возможную высоту ответа: растущий текст больше не
+            // трогает границы. Кожух — только по высоте: слоистое окно компонуется
+            // попиксельно, и лишняя площадь во всю MAX_WIDTH превращалась в лаг прозрачности.
+            // Вне хода кликабельную область сужает форма окна до видимой панели — вне формы
+            // Windows пропускает клики насквозь; форма прямоугольная, а не скруглённая:
+            // регион режется без сглаживания и грубые углы уже обжигали.
             fun settle(panelLeft: Float, panelTop: Float) {
-                val restW = max(targetWidth, if (turnActive) HudSizing.MAX_WIDTH else HudSizing.MIN_WIDTH)
+                val restW = max(targetWidth, HudSizing.MIN_WIDTH)
                 val restH = max(targetHeight, if (turnActive) HudSizing.MAX_HEIGHT else HudSizing.MIN_HEIGHT)
                 val restX = if (anchors.end) panelLeft + targetWidth - restW else panelLeft
                 val restY = if (anchors.bottom) panelTop + targetHeight - restH else panelTop
@@ -273,11 +285,20 @@ fun HudWindow(state: AppState) {
                     windowState.position = WindowPosition(restX.dp, restY.dp)
                     windowState.size = DpSize(restW.dp, restH.dp)
                 }
-                window.shape = Rectangle2D.Double(
-                    if (anchors.end) (restW - targetWidth).toDouble() else 0.0,
-                    if (anchors.bottom) (restH - targetHeight).toDouble() else 0.0,
-                    targetWidth.toDouble(),
-                    targetHeight.toDouble(),
+                applyShape(
+                    if (turnActive) {
+                        // На стриме форму не перекраиваем на каждый кусок ответа: пустой
+                        // столбец кожуха под панелью на несколько секунд глотает клики,
+                        // зато окно не мигает от постоянных SetWindowRgn.
+                        null
+                    } else {
+                        Rectangle2D.Double(
+                            if (anchors.end) (restW - targetWidth).toDouble() else 0.0,
+                            if (anchors.bottom) (restH - targetHeight).toDouble() else 0.0,
+                            targetWidth.toDouble(),
+                            targetHeight.toDouble(),
+                        )
+                    },
                 )
             }
 
@@ -355,12 +376,18 @@ fun HudWindow(state: AppState) {
                 withFrameNanos { }
                 withFrameNanos { }
             }
-            // Хит-бокс на время движения — весь путь панели (не больше окна).
-            window.shape = Rectangle2D.Double(
-                (hullX - winX).toDouble(),
-                (hullY - winY).toDouble(),
-                hullW.toDouble(),
-                hullH.toDouble(),
+            // Хит-бокс на время движения — весь путь панели; на стриме форма не трогается.
+            applyShape(
+                if (turnActive) {
+                    null
+                } else {
+                    Rectangle2D.Double(
+                        (hullX - winX).toDouble(),
+                        (hullY - winY).toDouble(),
+                        hullW.toDouble(),
+                        hullH.toDouble(),
+                    )
+                },
             )
 
             if (expanded) {
