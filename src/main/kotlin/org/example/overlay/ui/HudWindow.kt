@@ -245,6 +245,14 @@ fun HudWindow(state: AppState) {
         val panelH = remember { Animatable(HudSizing.COLLAPSED) }
         var animating by remember { mutableStateOf(false) }
         var showPill by remember { mutableStateOf(true) }
+
+        // Ширина кожуха за ход: монотонный максимум. Ширина панели пересчитывается по самой
+        // длинной строке ответа и растёт с каждым словом первого абзаца — если вести кожух
+        // по ней, границы окна дёргаются на каждой дельте. Сбрасывается по концу хода.
+        var turnHullWidth by remember { mutableStateOf(0f) }
+        LaunchedEffect(turnActive) {
+            if (!turnActive) turnHullWidth = 0f
+        }
         var anchors by remember {
             mutableStateOf(ScreenPlacement.anchors(placement.x, placement.y, HudSizing.MIN_WIDTH, HudSizing.MIN_HEIGHT))
         }
@@ -272,7 +280,15 @@ fun HudWindow(state: AppState) {
             // Windows пропускает клики насквозь; форма прямоугольная, а не скруглённая:
             // регион режется без сглаживания и грубые углы уже обжигали.
             fun settle(panelLeft: Float, panelTop: Float) {
-                val restW = max(targetWidth, HudSizing.MIN_WIDTH)
+                val restW = if (turnActive) {
+                    // Кожух хода не уже прозаической колонки: почти все ответы в неё
+                    // умещаются, и границы окна за ход не двигаются ни разу. Шире — только
+                    // монотонно, если приехала широкая таблица.
+                    turnHullWidth = maxOf(turnHullWidth, targetWidth, HudSizing.proseWidth(settings.hud.fontSize))
+                    turnHullWidth
+                } else {
+                    max(targetWidth, HudSizing.MIN_WIDTH)
+                }
                 val restH = max(targetHeight, if (turnActive) HudSizing.MAX_HEIGHT else HudSizing.MIN_HEIGHT)
                 val restX = if (anchors.end) panelLeft + targetWidth - restW else panelLeft
                 val restY = if (anchors.bottom) panelTop + targetHeight - restH else panelTop
