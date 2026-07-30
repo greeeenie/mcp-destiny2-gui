@@ -14,11 +14,11 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
@@ -28,25 +28,27 @@ import org.example.overlay.app.OverlayStatus
 import org.jetbrains.skia.FilterBlurMode
 import org.jetbrains.skia.MaskFilter
 import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.min
 import kotlin.math.pow
-import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlin.random.Random
+import kotlin.math.cos
 
 /**
- * Живой призрак вместо набора статусных значков: четыре крыла оболочки (контуры — из
- * фирменного логотипа) вокруг смыслового ядра. Оболочка рассказывает про процесс
- * (импульсные циклы «раскрылся → крутанулся → собрался»), ядро — про происходящее:
- * пульсирует от настоящего голоса, кружит зрачком при обдумывании, бьётся сердцем
- * с расходящимися кольцами при речи, подмигивает при подключении и показывает «!»
- * при ошибке. В покое призрак полностью статичен.
+ * Живой призрак вместо набора статусных значков — силуэт «Пружина» из фирменного логотипа
+ * (destiny-2-assistant-logo-vector-color): четыре крыла вокруг ядра-глаза из двух скобок
+ * и круга. Крылья делают полуоборот с пружинным перелётом (кривая снята с CSS-анимации
+ * исходного SVG), ядро контрит его полуоборотом навстречу — как в оригинале.
  *
- * Угол и часы цикла живут в едином [sharedMotion] на всё приложение: `Crossfade` в HUD
+ * Статус читается по самому ядру: круг дышит настоящим голосом и скобки приоткрываются,
+ * скобки-радар кружат при обдумывании, круг бьётся сердцем и расталкивает скобки при
+ * речи, подмигивает при подключении, тлеет при обрыве и уступает место «!» при ошибке.
+ * В покое призрак полностью статичен в авторской позе.
+ *
+ * Часы цикла живут в едином [sharedMotion] на всё приложение: `Crossfade` в HUD
  * пересоздаёт композабл на каждую смену статуса, и локальное состояние сбрасывало бы
- * поворот. Новый статус вступает только после фазы сборки текущего цикла.
+ * фазу. Новый статус вступает только на границе пружинного цикла — поза в этот момент
+ * собрана, скачка нет.
  *
  * [micLevel] — живой уровень микрофона 0..1: в статусе «Слушает» им дышит ядро.
  */
@@ -55,23 +57,18 @@ fun GhostIcon(status: OverlayStatus, micLevel: Float = 0f, modifier: Modifier = 
     val spec = ghostSpec(status)
     val levelInput by rememberUpdatedState(micLevel)
 
-    var rotation by remember { mutableFloatStateOf(sharedMotion.rotation) }
-    var envelope by remember { mutableFloatStateOf(0f) }
-    var coreEnvelope by remember { mutableFloatStateOf(0f) }
-    var time by remember { mutableFloatStateOf(sharedMotion.time) }
+    var prof by remember { mutableFloatStateOf(sharedMotion.prof) }
+    var clock by remember { mutableFloatStateOf(sharedMotion.clock) }
     var level by remember { mutableFloatStateOf(0f) }
 
-    // Цикл живёт и в статичных статусах: там мотор доводит поворот до собранной позы
-    // и дожидается границы цикла предыдущего статуса.
+    // Цикл живёт и в статичных статусах: мотор дожидается границы цикла предыдущего.
     LaunchedEffect(spec) {
         var last = 0L
         while (true) {
             withFrameNanos { now ->
                 sharedMotion.advance(spec, now)
-                rotation = sharedMotion.rotation
-                envelope = sharedMotion.envelope
-                coreEnvelope = sharedMotion.coreEnvelope
-                time = sharedMotion.time
+                prof = sharedMotion.prof
+                clock = sharedMotion.clock
 
                 // Сглаживание голоса: замеры приходят раз в ~100 мс, ядро не должно дёргаться.
                 if (last != 0L) {
@@ -84,7 +81,7 @@ fun GhostIcon(status: OverlayStatus, micLevel: Float = 0f, modifier: Modifier = 
     }
 
     Canvas(modifier) {
-        drawGhost(spec, rotation, envelope, coreEnvelope, time, level)
+        drawGhost(spec, prof, clock, level)
     }
 }
 
@@ -92,18 +89,18 @@ fun GhostIcon(status: OverlayStatus, micLevel: Float = 0f, modifier: Modifier = 
  * Обратный отсчёт до сворачивания HUD. Идёт сразу после «печатает», поэтому стартует в его
  * акцентном цвете и гасит крылья по очереди — верхнее, правое, нижнее, левое: каждое
  * погасшее — минус четверть времени, внутри своей четверти крыло плавно остывает. Ядро
- * гаснет с последним крылом и стягивается к размеру покоя; сам призрак статичен, так что
- * к нулю он приходит ровно к виду «Готов». [fraction] — сколько времени осталось, от 1 до 0.
+ * гаснет с последним крылом; сам призрак статичен, так что к нулю он приходит ровно
+ * к виду «Готов». [fraction] — сколько времени осталось, от 1 до 0.
  */
 @Composable
 fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
-    var rotation by remember { mutableFloatStateOf(sharedMotion.rotation) }
+    var prof by remember { mutableFloatStateOf(sharedMotion.prof) }
 
     LaunchedEffect(Unit) {
         while (true) {
             withFrameNanos { now ->
                 sharedMotion.advance(COUNTDOWN_SPEC, now)
-                rotation = sharedMotion.rotation
+                prof = sharedMotion.prof
             }
         }
     }
@@ -115,161 +112,120 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
             lerp(OverlayColors.TextDim, OverlayColors.Accent, warmth)
         }
         drawGhost(
-            COUNTDOWN_SPEC, rotation,
-            envelope = 0f, coreEnvelope = 0f, time = 0f, level = 0f,
+            COUNTDOWN_SPEC, prof, clock = 0f, level = 0f,
             wingColors = wingColors,
             coreColor = lerp(OverlayColors.TextDim, OverlayColors.Accent, (f * WING_COUNT).coerceIn(0f, 1f)),
-            coreRadiusOverride = CORE_REST + (CORE_RADIUS - CORE_REST) * f,
         )
     }
 }
 
-/** Отсчёт статичен и сер, как «Готов»: время показывает только дуга вокруг ядра. */
+/** Отсчёт статичен и сер, как «Готов»: время показывают остывающие крылья. */
 private val COUNTDOWN_SPEC = GhostSpec(
-    shell = OverlayColors.TextDim, core = OverlayColors.TextDim,
-    periodSec = 0f, spreadUnits = 0f, burstDeg = 0f, idleDegPerSec = 0f,
+    shell = OverlayColors.TextDim, core = OverlayColors.TextDim, periodSec = 0f,
 )
 
-/** Направление рывков оболочки. */
-private enum class SpinDirection {
-    Clockwise, CounterClockwise,
-
-    /** Каждый цикл — в противоположную сторону: призрак «вертит головой». */
-    Alternate,
-
-    /** Случайная сторона на каждый цикл: хаос, «сканирую». */
-    Random,
-}
-
-/** Как живёт ядро: у каждого статуса — свой рассказ о происходящем. */
-private enum class CoreStyle {
-    /** Спокойный статичный круг. */
+/** Как ядро-глаз рассказывает о происходящем: скобки и круг живут раздельно. */
+private enum class CenterStyle {
+    /** Авторская поза: скобки и круг на месте. */
     Steady,
 
-    /** Дышит настоящим уровнем микрофона: заговорил — ожило, замолчал — притихло. */
+    /** Круг дышит настоящим уровнем микрофона, скобки приоткрываются на громком. */
     Voice,
 
-    /** Зрачок съезжает с центра и кружит по орбите — «высматривает». */
-    Pupil,
+    /** Скобки-радар безостановочно кружат вокруг круга — «сканирую». */
+    Radar,
 
-    /** Сердцебиение (два удара → кулдаун) с расходящимися звуковыми кольцами. */
+    /** Сердцебиение круга (два удара → кулдаун); скобки толкаются наружу на ударах. */
     Beat,
 
-    /** Двойное подмигивание, как индикатор на роутере: «стучусь». */
+    /** Двойное подмигивание круга, как индикатор на роутере: «стучусь». */
     Blink,
+
+    /** Потухший глаз: скобки на месте, круг едва тлеет. */
+    Dim,
+
+    /** Вместо круга — «!»: ошибка, в отличие от тихого обрыва. */
+    Bang,
 }
 
 /** Поведение призрака в одном статусе. */
 private data class GhostSpec(
     val shell: Color,
     val core: Color,
-    /** Период цикла «раскрылся → крутанулся → собрался», сек. 0 — призрак статичен. */
+    /** Базовый период статуса, сек; сам пружинный цикл длиннее в [SPRING_CYCLE] раз. 0 — замер. */
     val periodSec: Float,
-    /** Насколько крылья отходят от ядра на пике раскрытия, в единицах вьюбокса. */
-    val spreadUnits: Float,
-    /** Угол рывка за цикл. Кратный 90° бесшовен: у оболочки четырёхлучевая симметрия. */
-    val burstDeg: Float,
-    /** Фоновое вращение между рывками, градусов в секунду. */
-    val idleDegPerSec: Float,
-    val direction: SpinDirection = SpinDirection.Clockwise,
-    /** Сила свечения на раскрытии, 0..1. */
+    /** Сила свечения на пике рывка, 0..1. */
     val glow: Float = 0f,
-    /** Каждый N-й цикл — вспышка: шире и ярче. 0 — без вспышек. */
-    val flareEveryN: Int = 0,
-    val flareBoost: Float = 1.6f,
-    val coreStyle: CoreStyle = CoreStyle.Steady,
-    /** Базовый радиус ядра: в покое оно меньше, чем в активных статусах. */
-    val coreRadiusUnits: Float = CORE_RADIUS,
-    /** Амплитуда сердцебиения ядра, 0..1 от [CORE_PULSE] (для [CoreStyle.Beat]). */
-    val corePulse: Float = 0f,
-    /** Период сердцебиения «два удара → кулдаун», сек (для [CoreStyle.Beat]). */
-    val coreBeatPeriodSec: Float = 0f,
-    /** Ядро кольцом вместо заливки — статусы, где линия мертва. */
-    val coreHollow: Boolean = false,
-    /** «!» внутри кольца — ошибка, в отличие от тихого обрыва. */
-    val coreBang: Boolean = false,
+    /** Амплитуда сердцебиения круга, 0..1 (для [CenterStyle.Beat]). */
+    val pulse: Float = 0f,
+    val center: CenterStyle = CenterStyle.Steady,
 )
 
 /**
- * Логика соответствия «действие → поведение»: энергия движения = объём работы, оболочка — про
- * процесс, ядро — про происходящее, полный замер — «я умер».
+ * Логика соответствия «действие → поведение»: крылья рассказывают про процесс (темп
+ * пружины = объём работы), ядро — про суть происходящего, полный замер — «я умер».
  */
 private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
-    // Дежурит: полностью статичен в собранной позе, ядро поменьше — жив, но не отвлекает.
+    // Дежурит: полностью статичен в авторской позе — жив, но не отвлекает.
     OverlayStatus.Ready -> GhostSpec(
-        shell = OverlayColors.TextDim, core = OverlayColors.TextDim,
-        periodSec = 0f, spreadUnits = 0f, burstDeg = 0f, idleDegPerSec = 0f,
-        coreRadiusUnits = CORE_REST,
+        shell = OverlayColors.TextDim, core = OverlayColors.TextDim, periodSec = 0f,
     )
 
-    // Слушает: неглубоко дышит, «вертит головой», ядро пульсирует от настоящего голоса.
+    // Слушает: неспешные пружинные обороты, ядро дышит настоящим голосом.
     OverlayStatus.Listening -> GhostSpec(
         shell = OverlayColors.Ok, core = OverlayColors.Ok,
-        periodSec = 1.3f, spreadUnits = 18f, burstDeg = 20f, idleDegPerSec = 0f,
-        direction = SpinDirection.Alternate, glow = 0.55f, coreStyle = CoreStyle.Voice,
+        periodSec = 1.1f, glow = 0.55f, center = CenterStyle.Voice,
     )
 
-    // Думает: широкие полуобороты туда-сюда, ядро-зрачок кружит — «высматривает».
+    // Думает: бодрые обороты, скобки-радар кружат — «высматривает».
     OverlayStatus.Thinking -> GhostSpec(
         shell = OverlayColors.Accent, core = OverlayColors.Accent,
-        periodSec = 0.8f, spreadUnits = 62f, burstDeg = 180f, idleDegPerSec = 24f,
-        direction = SpinDirection.Alternate, glow = 0.65f, flareEveryN = 1, flareBoost = 1.4f,
-        coreStyle = CoreStyle.Pupil,
+        periodSec = 0.8f, glow = 0.65f, center = CenterStyle.Radar,
     )
 
-    // Стучится: методичные обороты в одну сторону, ядро подмигивает.
+    // Стучится: медленные обороты, круг подмигивает.
     OverlayStatus.Connecting, is OverlayStatus.Reconnecting -> GhostSpec(
         shell = OverlayColors.Warn, core = OverlayColors.Warn,
-        periodSec = 1.5f, spreadUnits = 40f, burstDeg = 90f, idleDegPerSec = 14f,
-        glow = 0.25f, coreStyle = CoreStyle.Blink,
+        periodSec = 1.5f, glow = 0.25f, center = CenterStyle.Blink,
     )
 
-    // Говорит: оболочка ровно плывёт, ядро бьётся сердцем и пускает звуковые кольца.
+    // Говорит: ровный ход, круг бьётся сердцем и расталкивает скобки.
     OverlayStatus.Answering, OverlayStatus.Speaking -> GhostSpec(
         shell = OverlayColors.Accent, core = OverlayColors.Accent,
-        periodSec = 0.2f, spreadUnits = 16f, burstDeg = 0f, idleDegPerSec = 70f,
-        glow = 0.65f, coreStyle = CoreStyle.Beat, corePulse = 0.9f, coreBeatPeriodSec = 1.2f,
+        periodSec = 0.9f, glow = 0.65f, pulse = 0.9f, center = CenterStyle.Beat,
     )
 
-    // Линия мертва: без движения, ядро гаснет до кольца.
+    // Линия мертва: без движения, круг едва тлеет.
     OverlayStatus.Disconnected -> GhostSpec(
         shell = OverlayColors.TextDim, core = OverlayColors.TextDim,
-        periodSec = 0f, spreadUnits = 0f, burstDeg = 0f, idleDegPerSec = 0f, coreHollow = true,
+        periodSec = 0f, center = CenterStyle.Dim,
     )
 
-    // Ошибка: то же кольцо, но с «!» — отличается от обрыва не только цветом.
+    // Ошибка: вместо круга «!» в красных скобках — отличается от обрыва не только цветом.
     is OverlayStatus.Failed -> GhostSpec(
         shell = OverlayColors.Error, core = OverlayColors.Error,
-        periodSec = 0f, spreadUnits = 0f, burstDeg = 0f, idleDegPerSec = 0f,
-        coreHollow = true, coreBang = true,
+        periodSec = 0f, center = CenterStyle.Bang,
     )
 }
 
 /**
- * Единый мотор призрака на всё приложение: смены статусов и отсчёт продолжают движение
- * с того же угла. Во время `Crossfade` два экземпляра иконки живут одновременно и оба
- * зовут [advance] — защита по времени кадра гасит второй вызов (dt = 0).
+ * Единый мотор призрака на всё приложение: смены статусов и отсчёт продолжают ход с той же
+ * фазы. Во время `Crossfade` два экземпляра иконки живут одновременно и оба зовут
+ * [GhostMotion.advance] — защита по времени кадра гасит второй вызов (dt = 0).
  */
 private val sharedMotion = GhostMotion()
 
 /** Накопленное состояние движения: живёт между кадрами, статусами и композаблами. */
 private class GhostMotion {
-    var rotation = 0f
-        private set
-    var envelope = 0f
-        private set
-    var coreEnvelope = 0f
+    /** Профиль пружины 0..1 (с перелётом): 0 — собранная поза, 1 — полуоборот. */
+    var prof = 0f
         private set
 
-    /** Общие часы: на них едут зрачок, кольца и мигание ядра. */
-    var time = 0f
+    /** Часы текущего статуса: на них едут радар, сердцебиение и мигание ядра. */
+    var clock = 0f
         private set
 
     private var lastNanos = 0L
-    private var clock = 0f
-    private var curCycle = 0L
-    private var prevSpinP = 0f
-    private var randDir = 1f
 
     /** Спека, которая реально анимируется; новая ждёт границы цикла (см. [advance]). */
     private var active: GhostSpec? = null
@@ -283,21 +239,19 @@ private class GhostMotion {
         val dt = ((nowNanos - lastNanos) / 1_000_000_000f).coerceAtMost(0.1f)
         if (dt <= 0f) return
         lastNanos = nowNanos
-        time += dt
 
-        // Новый статус вступает только после фазы сборки текущего цикла: сегменты сложены,
-        // рывок докручен — и лишь тогда призрак меняет поведение.
+        // Новый статус вступает только на финальной паузе цикла: пружина в собранной
+        // позе (prof = 0), поэтому смена поведения не дёргает картинку.
         val current = active
         val spec = if (current == null || current == target) {
             active = target
             target
         } else {
-            val t = if (current.periodSec > 0f) (clock / current.periodSec).mod(1f) else 1f
-            if (current.periodSec <= 0f || t >= CLOSE_END) {
+            val dur = current.periodSec * SPRING_CYCLE
+            val t = if (dur > 0f) (clock / dur).mod(1f) else 1f
+            if (dur <= 0f || t >= SWITCH_GATE) {
                 active = target
                 clock = 0f
-                curCycle = 0L
-                prevSpinP = 0f
                 target
             } else {
                 current
@@ -305,287 +259,230 @@ private class GhostMotion {
         }
 
         if (spec.periodSec <= 0f) {
-            envelope = 0f
-            coreEnvelope = 0f
-            prevSpinP = 0f
-            if (spec.idleDegPerSec != 0f) {
-                rotation = (rotation + spec.idleDegPerSec * dt).mod(360f)
-            } else if (spec.burstDeg == 0f) {
-                // Статичный покой: поворот доезжает до ближайшего кратного 90° и замирает —
-                // у оболочки четырёхлучевая симметрия, это та же собранная поза.
-                val rest = (rotation / 90f).roundToInt() * 90f
-                rotation += (rest - rotation) * min(1f, dt * 10f)
-                if (abs(rest - rotation) < 0.05f) rotation = rest
-            }
+            prof = 0f
             return
         }
         clock += dt
-        val cycles = (clock / spec.periodSec).toLong()
-        val t = clock / spec.periodSec - cycles
-        val env: Float
-        val spinP: Float
-        when {
-            t < OPEN_END -> {
-                env = easeOut(t / OPEN_END)
-                spinP = 0f
-            }
-            t < SPIN_END -> {
-                env = 1f
-                spinP = easeInOut((t - OPEN_END) / (SPIN_END - OPEN_END))
-            }
-            t < CLOSE_END -> {
-                env = 1f - easeInOut((t - SPIN_END) / (CLOSE_END - SPIN_END))
-                spinP = 1f
-            }
-            else -> {
-                env = 0f
-                spinP = 1f
-            }
-        }
-
-        val flare = if (spec.flareEveryN > 0 && cycles % spec.flareEveryN == spec.flareEveryN - 1L) {
-            spec.flareBoost
-        } else {
-            1f
-        }
-        envelope = env * flare
-
-        coreEnvelope = if (spec.coreBeatPeriodSec > 0f) {
-            // Сердцебиение: sin² на активной части периода даёт ровно два удара, дальше кулдаун.
-            val beat = (clock / spec.coreBeatPeriodSec).mod(1f)
-            if (beat < BEAT_ACTIVE) sin(beat / BEAT_ACTIVE * 2f * PI.toFloat()).pow(2) else 0f
-        } else {
-            envelope
-        }
-
-        if (cycles != curCycle) {
-            // Хвост прошлого цикла докручивается его же направлением, и только потом смена.
-            rotation += spec.burstDeg * direction(spec, curCycle) * (1f - prevSpinP)
-            curCycle = cycles
-            prevSpinP = 0f
-            if (spec.direction == SpinDirection.Random) randDir = if (Random.nextBoolean()) 1f else -1f
-        }
-        val dir = direction(spec, cycles)
-        rotation = (rotation + spec.burstDeg * dir * (spinP - prevSpinP) + spec.idleDegPerSec * dir * dt).mod(360f)
-        prevSpinP = spinP
-    }
-
-    private fun direction(spec: GhostSpec, cycle: Long): Float = when (spec.direction) {
-        SpinDirection.Clockwise -> 1f
-        SpinDirection.CounterClockwise -> -1f
-        SpinDirection.Alternate -> if (cycle % 2 == 0L) 1f else -1f
-        SpinDirection.Random -> randDir
+        prof = springProfile((clock / (spec.periodSec * SPRING_CYCLE)).mod(1f))
     }
 }
 
-private fun easeOut(x: Float) = 1f - (1f - x).pow(3)
+/** Пружинная ступень 0→1 с перелётом ~6% — подгон под кривую из исходного SVG. */
+private fun springStep(x: Float): Float {
+    val s = 7.4f
+    val w = 8.27f
+    return 1f - exp(-s * x) * (cos(w * x) + s / w * sin(w * x))
+}
 
-private fun easeInOut(x: Float) =
-    if (x < 0.5f) 4f * x * x * x else 1f - ((-2f * x + 2f).pow(3)) / 2f
+/** Раскладка цикла из исходника: полуоборот → пауза → полуоборот обратно → пауза. */
+private fun springProfile(t: Float): Float = when {
+    t < 0.39f -> springStep(t / 0.39f)
+    t < 0.51f -> 1f
+    t < 0.9f -> 1f - springStep((t - 0.51f) / 0.39f)
+    else -> 0f
+}
 
 private fun DrawScope.drawGhost(
     spec: GhostSpec,
-    rotation: Float,
-    envelope: Float,
-    coreEnvelope: Float,
-    time: Float,
+    prof: Float,
+    clock: Float,
     level: Float,
     /** Цвета крыльев по одному, если они разошлись (отсчёт); null — все цветом [GhostSpec.shell]. */
     wingColors: List<Color>? = null,
     coreColor: Color = spec.core,
-    coreRadiusOverride: Float? = null,
 ) {
     val s = size.minDimension / VIEWBOX
-    val spread = spec.spreadUnits * envelope
-    // Оболочка светится с раскрытием, ядро — со своим ритмом.
-    val shellGlow = spec.glow * envelope
-    val coreGlow = spec.glow * when (spec.coreStyle) {
-        CoreStyle.Voice -> level
-        CoreStyle.Beat -> coreEnvelope
-        else -> envelope
-    }
+    // Свечение вспыхивает в момент рывка и гаснет на паузах; перелёт профиля обрезается.
+    val glowNow = spec.glow * sin(PI.toFloat() * prof.coerceIn(0f, 1f))
     // Blur у Skia — в пикселях устройства, поэтому радиус приводится к размеру холста.
-    val shellSigma = shellGlow * GLOW_SIGMA_UNITS * s
-    val coreSigma = coreGlow * GLOW_SIGMA_UNITS * s
+    val sigma = glowNow * GLOW_SIGMA_UNITS * s
 
     withTransform({
-        translate((size.width - VIEWBOX * s) / 2f, (size.height - VIEWBOX * s) / 2f)
+        translate(size.width / 2f - WING_CX * s, size.height / 2f - WING_CY * s)
         scale(s, s, Offset.Zero)
     }) {
-        // Вся оболочка крутится как одно целое — крылья никогда не идут врозь.
-        rotate(rotation, pivot = Offset(CENTRE, CENTRE)) {
-            shellSegments.forEachIndexed { index, segment ->
+        // Крылья — полуоборот против часовой с пружиной, как в исходном логотипе.
+        rotate(-180f * prof, pivot = Offset(WING_CX, WING_CY)) {
+            wings.forEachIndexed { index, wing ->
                 val color = wingColors?.get(index) ?: spec.shell
-                translate(segment.dir.x * spread, segment.dir.y * spread) {
-                    if (shellGlow > 0.03f) drawGlowPath(segment.path, color, shellGlow, shellSigma)
-                    drawPath(segment.path, color)
-                }
+                if (glowNow > 0.03f) drawGlowPath(wing, color, glowNow, sigma)
+                drawPath(wing, color)
             }
         }
 
-        if (spec.coreHollow) {
-            // Погасшее ядро: пустое кольцо — призрак «выключен».
-            drawCircle(
+        // Ядро: скобки и круг живут раздельно — каждый статус играет ими по-своему.
+        var dotK = 1f
+        var dotAlpha = 1f
+        var brSpread = 0f
+        var brSpin = 0f
+        var bang = false
+        when (spec.center) {
+            CenterStyle.Steady -> Unit
+
+            CenterStyle.Voice -> {
+                dotK = 0.75f + 1.3f * level
+                brSpread = 26f * level
+            }
+
+            CenterStyle.Radar -> brSpin = (clock * RADAR_DEG_PER_SEC).mod(360f)
+
+            CenterStyle.Beat -> {
+                val b = (clock / BEAT_PERIOD).mod(1f)
+                val w = if (b < BEAT_ACTIVE) sin(b / BEAT_ACTIVE * 2f * PI.toFloat()).pow(2) else 0f
+                dotK = 1.1f + 0.75f * spec.pulse * (w * 2f - 1f)
+                brSpread = 34f * w
+            }
+
+            CenterStyle.Blink -> {
+                val p = clock.mod(1f)
+                dotAlpha = if (p < 0.09f || (p > 0.2f && p < 0.29f)) 1f else 0.25f
+            }
+
+            CenterStyle.Dim -> dotAlpha = 0.25f
+
+            CenterStyle.Bang -> bang = true
+        }
+
+        // Скобки контрят пружину полуоборотом навстречу; радар добавляет свой ход.
+        rotate(180f * prof + brSpin, pivot = Offset(CORE_CX, CORE_CY)) {
+            translate(-brSpread, 0f) { drawPath(bracketLeft, coreColor) }
+            translate(brSpread, 0f) { drawPath(bracketRight, coreColor) }
+        }
+        if (bang) {
+            drawRoundRect(
                 color = coreColor,
-                radius = CORE_RADIUS,
-                center = Offset(CENTRE, CENTRE),
-                style = Stroke(width = HOLLOW_STROKE),
+                topLeft = Offset(BANG_X, BANG_Y),
+                size = Size(BANG_W, BANG_H),
+                cornerRadius = CornerRadius(BANG_W / 2f, BANG_W / 2f),
             )
-            if (spec.coreBang) {
-                drawRoundRect(
-                    color = coreColor,
-                    topLeft = Offset(BANG_X, BANG_Y),
-                    size = Size(BANG_W, BANG_H),
-                    cornerRadius = CornerRadius(BANG_W / 2f, BANG_W / 2f),
-                )
-                drawCircle(coreColor, radius = BANG_DOT_R, center = Offset(CENTRE, BANG_DOT_Y))
-            }
-            return@withTransform
+            drawCircle(coreColor, radius = BANG_DOT_R, center = Offset(CORE_CX, BANG_DOT_Y))
+        } else {
+            drawCircle(
+                color = coreColor.copy(alpha = coreColor.alpha * dotAlpha),
+                radius = DOT_R * dotK,
+                center = Offset(DOT_CX, DOT_CY),
+            )
         }
-
-        var centre = Offset(CENTRE, CENTRE)
-        var radius = coreRadiusOverride ?: spec.coreRadiusUnits
-        var alpha = 1f
-        when (spec.coreStyle) {
-            CoreStyle.Steady -> Unit
-
-            // Пульс от голоса: заговорил — ядро ожило, замолчал — притихло.
-            CoreStyle.Voice -> radius = CORE_RADIUS * 0.75f + CORE_PULSE * 1.8f * level
-
-            // Зрачок кружит по орбите с неровным ходом — «высматривает».
-            CoreStyle.Pupil -> {
-                val a = time * 2.6f + sin(time * 1.15f) * 1.6f
-                centre = Offset(CENTRE + PUPIL_ORBIT * cos(a), CENTRE + PUPIL_ORBIT * sin(a))
-                radius = CORE_RADIUS * 0.82f
-            }
-
-            // Сердцебиение; на ударах от ядра расходятся тающие звуковые кольца.
-            CoreStyle.Beat -> {
-                radius = CORE_RADIUS + CORE_PULSE * spec.corePulse * (coreEnvelope * 2f - 1f)
-                repeat(2) { k ->
-                    val p = (time / spec.coreBeatPeriodSec + k * 0.5f).mod(1f)
-                    drawCircle(
-                        color = coreColor.copy(alpha = (1f - p) * 0.45f),
-                        radius = radius + 40f + p * 260f,
-                        center = Offset(CENTRE, CENTRE),
-                        style = Stroke(width = RIPPLE_STROKE),
-                    )
-                }
-            }
-
-            // Двойное подмигивание, как индикатор на роутере: «стучусь».
-            CoreStyle.Blink -> {
-                val p = time.mod(1f)
-                alpha = if (p < 0.09f || (p > 0.2f && p < 0.29f)) 1f else 0.3f
-                radius = CORE_RADIUS * 0.9f
-            }
-        }
-
-        if (coreGlow > 0.03f) drawGlowCircle(centre, radius, coreColor, coreGlow, coreSigma)
-        drawCircle(color = coreColor.copy(alpha = coreColor.alpha * alpha), radius = radius, center = centre)
     }
 }
 
 /** Размытая копия позади заливки — свечение цветом элемента. */
 private fun DrawScope.drawGlowPath(path: Path, color: Color, glow: Float, sigma: Float) {
     if (sigma <= 0f) return
-    val paint = glowPaint(color, glow, sigma)
-    drawIntoCanvas { it.drawPath(path, paint) }
-}
-
-private fun DrawScope.drawGlowCircle(centre: Offset, radius: Float, color: Color, glow: Float, sigma: Float) {
-    if (sigma <= 0f) return
-    val paint = glowPaint(color, glow, sigma)
-    drawIntoCanvas { it.drawCircle(centre, radius, paint) }
-}
-
-private fun glowPaint(color: Color, glow: Float, sigma: Float): Paint {
     val paint = Paint()
     paint.color = color.copy(alpha = min(1f, glow * 1.1f))
     paint.asFrameworkPaint().maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, sigma)
-    return paint
+    drawIntoCanvas { it.drawPath(path, paint) }
 }
 
-/** Контуры крыльев — как в icon_to_animate.svg, вьюбокс 965×965. */
+/**
+ * Геометрия — из destiny-2-assistant-logo-vector-color 4.svg (вьюбокс 992×938). Трансформы
+ * вложенных групп запечены в контуры при загрузке, рисование идёт в координатах исходника;
+ * холст масштабируется как прежний квадратный вьюбокс, чтобы размер иконки не поменялся.
+ */
 private const val VIEWBOX = 965f
-private const val CENTRE = VIEWBOX / 2f
 
-/** Ядро и размах его пульса — подобраны на стенде. */
-private const val CORE_RADIUS = 144f
-private const val CORE_PULSE = 60f
-private const val HOLLOW_STROKE = 38f
+/** Центр вращения крыльев и ядра в координатах исходника. */
+private const val WING_CX = 495.8f
+private const val WING_CY = 455.49f
+private const val CORE_CX = 496f
+private const val CORE_CY = 455f
 
-/** Орбита ядра-зрачка у «Думает». */
-private const val PUPIL_ORBIT = 74f
+/** Круг ядра. */
+private const val DOT_CX = 496.5f
+private const val DOT_CY = 455.5f
+private const val DOT_R = 46.5f
 
-/** Звуковые кольца «Говорит». */
-private const val RIPPLE_STROKE = 16f
-
-/** «!» внутри кольца ошибки. */
-private const val BANG_X = 469f
-private const val BANG_Y = 390f
-private const val BANG_W = 27f
-private const val BANG_H = 120f
-private const val BANG_DOT_Y = 558f
-private const val BANG_DOT_R = 20f
-
-/** Радиус ядра в покое: меньше рабочего, чтобы не отвлекать. */
-private const val CORE_REST = 100f
+/** «!» на месте круга при ошибке. */
+private const val BANG_X = 484f
+private const val BANG_Y = 370f
+private const val BANG_W = 24f
+private const val BANG_H = 110f
+private const val BANG_DOT_Y = 522f
+private const val BANG_DOT_R = 17f
 
 private const val WING_COUNT = 4
 
-/** Доли периода на фазы цикла: раскрытие держится всю «крутку» и складывается после. */
-private const val OPEN_END = 0.22f
-private const val SPIN_END = 0.58f
-private const val CLOSE_END = 0.82f
+/** Пружинный цикл длиннее базового периода статуса (в исходнике полный цикл 2.55 с). */
+private const val SPRING_CYCLE = 1.8f
 
-/** Доля периода сердцебиения, занятая двумя ударами; остаток — кулдаун. */
+/** Смена статуса — на финальной паузе цикла, когда пружина в собранной позе. */
+private const val SWITCH_GATE = 0.9f
+
+/** Скобки-радар у «Думает», градусов в секунду. */
+private const val RADAR_DEG_PER_SEC = 160f
+
+/** Период сердцебиения «два удара → кулдаун» и доля периода, занятая ударами. */
+private const val BEAT_PERIOD = 1.2f
 private const val BEAT_ACTIVE = 0.6f
 
 /** Радиус размытия свечения на полной силе, в единицах вьюбокса. */
 private const val GLOW_SIGMA_UNITS = 42f
 
-/** Сегмент оболочки: контур и направление «выдоха» от центра. */
-private class ShellSegment(val path: Path, val dir: Offset)
+private fun bakedPath(data: String, setup: Matrix.() -> Unit): Path {
+    val matrix = Matrix()
+    matrix.setup()
+    val path = PathParser().parsePathString(data).toPath()
+    path.transform(matrix)
+    return path
+}
 
-/** Крылья оболочки: верхнее, правое, нижнее, левое. Направление — «выдох» от центра. */
-private val shellSegments: List<ShellSegment> by lazy {
-    fun seg(data: String, dir: Offset) =
-        ShellSegment(PathParser().parsePathString(data).toPath(), dir)
+/** Крылья: верхнее, правое, нижнее, левое — порядок гашения при отсчёте. */
+private val wings: List<Path> by lazy {
     listOf(
-        seg(SEGMENT_TOP, Offset(0f, -1f)),
-        seg(SEGMENT_RIGHT, Offset(1f, 0f)),
-        seg(SEGMENT_BOTTOM, Offset(0f, 1f)),
-        seg(SEGMENT_LEFT, Offset(-1f, 0f)),
+        bakedPath(WING_VERTICAL) { translate(284.108f, 23.4405f) },
+        bakedPath(WING_HORIZONTAL) {
+            translate(977.85f, 243.7999f)
+            rotateZ(90f)
+            translate(0f, 20f)
+        },
+        bakedPath(WING_VERTICAL) {
+            translate(707.49f, 937.5417f)
+            rotateZ(-180f)
+            translate(0f, 49.9998f)
+        },
+        bakedPath(WING_HORIZONTAL) {
+            translate(13.749f, 667.1817f)
+            rotateZ(-90f)
+            translate(0f, 20f)
+        },
     )
 }
 
-private const val SEGMENT_TOP =
-    "M598.173 261.659C606.633 266.308 617.062 266.686 625.26 261.589L670.042 233.742C682.382 226.069 685.126 " +
-        "209.277 675.871 198.075L535.946 28.7137C531.386 23.1953 524.602 20 517.444 20.0001L504.52 20.0001L481.551 " +
-        "20L459.58 20.0001H445.685C438.512 20.0001 431.714 23.2091 427.155 28.7479L287.717 198.155C278.515 209.335 " +
-        "281.234 226.056 293.505 233.745L337.82 261.511C346.025 266.652 356.494 266.291 364.981 261.63C389.259 " +
-        "248.297 432.456 231.216 481.551 230.929C530.68 231.217 573.905 248.322 598.173 261.659Z"
+private val bracketLeft: Path by lazy { bakedPath(BRACKET_LEFT) { translate(293f, 221f) } }
+private val bracketRight: Path by lazy { bakedPath(BRACKET_RIGHT) { translate(293f, 221f) } }
 
-private const val SEGMENT_RIGHT =
-    "M702.442 598.173C697.793 606.633 697.415 617.062 702.513 625.26L730.359 670.042C738.032 682.382 754.824 " +
-        "685.126 766.026 675.871L935.387 535.946C940.906 531.386 944.101 524.602 944.101 517.444L944.101 " +
-        "504.52L944.101 481.551L944.101 459.58L944.101 445.685C944.101 438.512 940.892 431.714 935.353 " +
-        "427.155L765.946 287.717C754.766 278.515 738.045 281.234 730.357 293.505L702.59 337.82C697.449 346.025 " +
-        "697.81 356.494 702.471 364.981C715.804 389.259 732.885 432.456 733.172 481.551C732.885 530.68 715.779 " +
-        "573.905 702.442 598.173Z"
+/** Контур верхнего/нижнего крыла (в исходнике — с вырезом-дугой у ядра). */
+private const val WING_VERTICAL =
+    "M329.094 213.285C336.866 217.111 346.073 217.428 353.672 213.27L395.805 190.215C409.574 182.68 412.524 " +
+        "164.176 401.782 152.733L265.497 7.5728C260.96 2.74084 254.627 3.38311e-06 248 9.34735e-06L234.161 " +
+        "2.18009e-05H211.191H189.22H174.41C167.766 2.18009e-05 161.42 2.75377 156.882 7.60564L21.0652 " +
+        "152.812C10.3784 164.238 13.3047 182.67 27.0048 190.223L68.6855 213.205C76.2952 217.401 85.5364 217.098 " +
+        "93.3336 213.262C117.352 201.446 161.216 185.875 211.191 185.618C261.197 185.875 305.087 201.466 " +
+        "329.094 213.285Z"
 
-private const val SEGMENT_BOTTOM =
-    "M365.928 702.442C357.469 697.793 347.039 697.415 338.842 702.512L294.059 730.359C281.72 738.032 278.975 " +
-        "754.824 288.231 766.026L428.156 935.387C432.715 940.906 439.499 944.101 446.658 944.101L459.581 " +
-        "944.101L482.55 944.101L504.522 944.101L518.416 944.101C525.59 944.101 532.387 940.892 536.946 " +
-        "935.353L676.384 765.946C685.586 754.766 682.867 738.045 670.597 730.356L626.281 702.59C618.076 697.449 " +
-        "607.608 697.81 599.12 702.471C574.843 715.803 531.645 732.884 482.55 733.171C433.421 732.884 390.196 " +
-        "715.778 365.928 702.442Z"
+/** Контур правого/левого крыла (с «хвостиком»-стрелкой к центру). */
+private const val WING_HORIZONTAL =
+    "M328.645 240.46C336.351 246.274 346.702 246.686 354.9 241.589L399.682 213.742C412.022 206.069 414.766 " +
+        "189.277 405.511 178.075L265.586 8.71367C261.027 3.19523 254.242 5.07654e-06 247.084 1.38441e-05L246.758 " +
+        "1.42436e-05C241.814 2.02986e-05 237.613 3.61238 236.871 8.50006L220.837 114.187C220.068 119.255 215.712 " +
+        "123 210.586 123C205.386 123 200.99 119.148 200.308 113.992L186.37 8.6879C185.712 3.71558 181.472 " +
+        "2.47738e-05 176.456 2.47738e-05H175.326C168.152 2.47738e-05 161.354 3.20906 156.795 8.74785L17.3575 " +
+        "178.155C8.15523 189.335 10.8744 206.056 23.1449 213.745L67.4603 241.511C75.6656 246.652 86.0543 246.255 " +
+        "93.7847 240.424C117.898 222.236 161.528 191.29 211.191 191C260.887 191.29 304.541 222.276 328.645 240.46Z"
 
-private const val SEGMENT_LEFT =
-    "M261.659 365.928C266.308 357.468 266.686 347.039 261.589 338.842L233.742 294.059C226.069 281.719 209.277 " +
-        "278.975 198.075 288.23L28.7137 428.155C23.1953 432.715 20 439.499 20.0001 446.657L20.0001 459.581L20 " +
-        "482.55L20.0001 504.521L20.0001 518.416C20.0001 525.59 23.2091 532.387 28.7479 536.946L198.155 " +
-        "676.384C209.335 685.586 226.056 682.867 233.745 670.597L261.511 626.281C266.652 618.076 266.291 607.607 " +
-        "261.63 599.12C248.297 574.843 231.216 531.645 230.929 482.55C231.217 433.421 248.322 390.196 261.659 365.928Z"
+/** Левая скобка ядра-глаза. */
+private const val BRACKET_LEFT =
+    "M187.157 443.681C187.157 452.615 176.335 457.066 170.05 450.716L2.89269 281.832C1.03951 279.959 0 277.431 " +
+        "0 274.797V188.621C0 185.901 1.10801 183.298 3.06861 181.413L174.791 16.2815C181.145 10.1715 191.722 " +
+        "14.6746 191.722 23.4896V142.505C191.722 145.097 190.716 147.587 188.916 149.452L116.263 224.69C112.521 " +
+        "228.565 112.521 234.708 116.263 238.583L184.351 309.094C186.151 310.958 187.157 313.448 187.157 " +
+        "316.04V443.681Z"
+
+/** Правая скобка ядра-глаза. */
+private const val BRACKET_RIGHT =
+    "M218.843 443.681C218.843 452.615 229.665 457.066 235.95 450.716L403.107 281.832C404.96 279.959 406 277.431 " +
+        "406 274.797V188.621C406 185.901 404.892 183.298 402.931 181.413L231.209 16.2815C224.855 10.1715 214.278 " +
+        "14.6746 214.278 23.4896V142.505C214.278 145.097 215.284 147.587 217.084 149.452L289.737 224.69C293.479 " +
+        "228.565 293.479 234.708 289.737 238.583L221.649 309.094C219.849 310.958 218.843 313.448 218.843 " +
+        "316.04V443.681Z"
