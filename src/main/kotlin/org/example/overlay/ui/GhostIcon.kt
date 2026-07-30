@@ -108,18 +108,29 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
 
     Canvas(modifier) {
         val f = fraction.coerceIn(0f, 1f)
+        // Каскадное зажигание: из «печатает» крылья приходят серыми и загораются волной
+        // по кругу (верх → право → низ → лево) за первую десятую отсчёта — вместо
+        // резкой общей вспышки. Волна и дальнейшее гашение идут в одном порядке.
+        val ignite = ((1f - f) / IGNITE_FRACTION).coerceIn(0f, 1f)
         val wingColors = List(WING_COUNT) { i ->
-            // Четверть крыла: > 1 — очередь не дошла, 0..1 — мигает, <= 0 — погасло.
-            val q = f * WING_COUNT - (WING_COUNT - 1 - i)
-            when {
-                q >= 1f -> OverlayColors.Accent
-                q <= 0f -> OverlayColors.TextDim
-                // Чётные отрезки — синий, нечётные — серый; последний отрезок нечётный,
-                // поэтому крыло всегда догорает в сером и гаснет без скачка.
-                else -> if (((1f - q) * BLINK_SEGMENTS).toInt() % 2 == 0) {
-                    OverlayColors.Accent
-                } else {
-                    OverlayColors.TextDim
+            if (ignite < 1f) {
+                lerp(
+                    OverlayColors.TextDim, OverlayColors.Accent,
+                    (ignite * WING_COUNT - i).coerceIn(0f, 1f),
+                )
+            } else {
+                // Четверть крыла: > 1 — очередь не дошла, 0..1 — мигает, <= 0 — погасло.
+                val q = f * WING_COUNT - (WING_COUNT - 1 - i)
+                when {
+                    q >= 1f -> OverlayColors.Accent
+                    q <= 0f -> OverlayColors.TextDim
+                    // Чётные отрезки — синий, нечётные — серый; последний отрезок нечётный,
+                    // поэтому крыло всегда догорает в сером и гаснет без скачка.
+                    else -> if (((1f - q) * BLINK_SEGMENTS).toInt() % 2 == 0) {
+                        OverlayColors.Accent
+                    } else {
+                        OverlayColors.TextDim
+                    }
                 }
             }
         }
@@ -133,6 +144,9 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
 
 /** Отрезков мигания на четверть отсчёта: три вспышки «синее/серое» на крыло. */
 private const val BLINK_SEGMENTS = 6
+
+/** Доля отсчёта на волну зажигания крыльев — гасит резкий стык с «печатает». */
+private const val IGNITE_FRACTION = 0.1f
 
 /** Отсчёт статичен и сер, как «Готов»: время показывают остывающие крылья. */
 private val COUNTDOWN_SPEC = GhostSpec(
