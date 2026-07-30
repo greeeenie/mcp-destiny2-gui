@@ -468,7 +468,7 @@ fun HudWindow(state: AppState) {
                                     if (counting) {
                                         GhostCountdownIcon(collapseFraction ?: 1f, Modifier.size(24.dp))
                                     } else {
-                                        HudStatusIcon(current, Modifier.size(24.dp))
+                                        HudStatusIcon(current, micLevel, Modifier.size(24.dp))
                                     }
                                 }
                             }

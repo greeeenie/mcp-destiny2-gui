@@ -30,10 +30,11 @@ private const val STROKE_UNITS = 1.8f
 /**
  * Что происходит с голосом — одним живым призраком [GhostIcon]. Текста в шапке нет: подпись
  * игрок читать не успевает, а цвет и темп движения ловит боковым зрением (§5.3).
+ * [micLevel] — живой уровень микрофона: в «Слушает» им дышит ядро призрака.
  */
 @Composable
-fun HudStatusIcon(status: OverlayStatus, modifier: Modifier = Modifier) {
-    GhostIcon(status, modifier)
+fun HudStatusIcon(status: OverlayStatus, micLevel: Float = 0f, modifier: Modifier = Modifier) {
+    GhostIcon(status, micLevel, modifier)
 }
 
 /** Шестерёнка: открывает консоль. Контур, а не заливка — дырку в прозрачном окне не вырезать. */
