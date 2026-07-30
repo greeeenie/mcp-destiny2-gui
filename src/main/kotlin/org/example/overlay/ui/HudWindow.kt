@@ -42,6 +42,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
@@ -111,6 +112,9 @@ private const val CHROME_FADE_OUT_DELAY_MS = 250
 
 /** Дорожка уровня: сглаживание между стомиллисекундными замерами микрофона. */
 private const val LEVEL_ANIM_MS = 100
+
+/** Потолок ожидания, пока нативное окно применит границы (см. кожух в [HudWindow]). */
+private const val BOUNDS_APPLY_TIMEOUT_NANOS = 50_000_000L
 
 /**
  * Оверлей поверх игры (§5.3).
@@ -203,6 +207,18 @@ fun HudWindow(state: AppState) {
         LaunchedEffect(Unit) {
             // Страховка на случай, если параметр окна будет переопределён платформой.
             window.focusableWindowState = false
+        }
+
+        // Фактическое положение нативного окна. Границы применяются асинхронно: в кадры
+        // между записью windowState и реальным переездом панель, посчитанная от записанных
+        // координат, рисуется со сдвигом — на экране это выглядит как уход вбок на кадр.
+        // На высокой частоте кадров (144–300 Гц) таких кадров больше, и артефакт заметнее.
+        var nativeOrigin by remember { mutableStateOf(Offset(placement.x, placement.y)) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                withFrameNanos { }
+                nativeOrigin = Offset(window.x.toFloat(), window.y.toFloat())
+            }
         }
 
         LaunchedEffect(windowState) {
@@ -387,9 +403,17 @@ fun HudWindow(state: AppState) {
                 windowState.size = DpSize(hullW.dp, hullH.dp)
                 winX = hullX
                 winY = hullY
-                // Пара кадров на то, чтобы нативное окно применило границы и перерисовалось:
-                // если начать двигать панель сразу, первый кадр придётся на старый буфер.
-                withFrameNanos { }
+                // Ждём, пока нативное окно реально применит границы и перерисуется: если
+                // начать двигать панель раньше, кадры придутся на старый буфер. Считать
+                // «пару кадров» нельзя — на 300 Гц это единицы миллисекунд, окно за них
+                // не успевает; поэтому ждём по факту, с потолком на полсотни миллисекунд.
+                val deadline = System.nanoTime() + BOUNDS_APPLY_TIMEOUT_NANOS
+                while (System.nanoTime() < deadline &&
+                    (kotlin.math.abs(window.x - hullX) > 1f || kotlin.math.abs(window.y - hullY) > 1f ||
+                        kotlin.math.abs(window.width - hullW) > 1f || kotlin.math.abs(window.height - hullH) > 1f)
+                ) {
+                    withFrameNanos { }
+                }
                 withFrameNanos { }
             }
             // Хит-бокс на время движения — весь путь панели; на стриме форма не трогается.
@@ -436,7 +460,6 @@ fun HudWindow(state: AppState) {
         }
 
         OverlayTheme {
-            val windowPosition = windowState.position
             val anchorAlignment = when {
                 anchors.end && anchors.bottom -> Alignment.BottomEnd
                 anchors.end -> Alignment.TopEnd
@@ -462,10 +485,13 @@ fun HudWindow(state: AppState) {
             // Корень окна не рисует ничего: всё видимое — панель со скруглением и клипом.
             Box(modifier = Modifier.fillMaxSize()) {
                 val panelModifier = when {
-                    animating && windowPosition is WindowPosition.Absolute -> Modifier
+                    // Смещение — от фактического положения нативного окна, а не от
+                    // записанного в windowState: границы применяются асинхронно, и в кадры
+                    // рассинхрона панель иначе видимо уезжала бы вбок.
+                    animating -> Modifier
                         .offset(
-                            (panelX.value - windowPosition.x.value).dp,
-                            (panelY.value - windowPosition.y.value).dp,
+                            (panelX.value - nativeOrigin.x).dp,
+                            (panelY.value - nativeOrigin.y).dp,
                         )
                         .size(panelW.value.dp, panelH.value.dp)
 
