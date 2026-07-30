@@ -26,8 +26,10 @@ import org.example.overlay.app.OverlayStatus
 import org.jetbrains.skia.FilterBlurMode
 import org.jetbrains.skia.MaskFilter
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -57,13 +59,9 @@ fun GhostIcon(status: OverlayStatus, modifier: Modifier = Modifier) {
     var coreEnvelope by remember { mutableFloatStateOf(0f) }
     var time by remember { mutableFloatStateOf(sharedMotion.time) }
 
+    // Цикл живёт и в статичных статусах: там мотор доводит поворот до собранной позы
+    // и дожидается границы цикла предыдущего статуса.
     LaunchedEffect(spec) {
-        if (spec.periodSec == 0f && spec.idleDegPerSec == 0f) {
-            // Мёртвые статусы: призрак замирает как есть, кадры не жжём.
-            envelope = 0f
-            coreEnvelope = 0f
-            return@LaunchedEffect
-        }
         while (true) {
             withFrameNanos { now ->
                 sharedMotion.advance(spec, now)
@@ -118,11 +116,10 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
     }
 }
 
-/** Движение отсчёта — как у «Готов»: HUD спадает в пилюлю без смены пластики. */
+/** Движение отсчёта — как у «Готов»: призрак статичен, время показывают гаснущие шевроны. */
 private val COUNTDOWN_SPEC = GhostSpec(
     shell = OverlayColors.Accent, core = OverlayColors.Accent,
-    periodSec = 3f, spreadUnits = 0f, burstDeg = 20f, idleDegPerSec = 4f,
-    direction = SpinDirection.Alternate, glow = 0.2f, corePulse = 0.2f,
+    periodSec = 0f, spreadUnits = 0f, burstDeg = 0f, idleDegPerSec = 0f,
 )
 
 /** Направление рывков оболочки. */
@@ -177,11 +174,11 @@ private data class GhostSpec(
  * процесс, центр — про голос, редкая вспышка — «я живой», полный замер — «я умер».
  */
 private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
-    // Дежурит: шевроны не расходятся, только тихое покачивание ±20° — жив, но ничего не происходит.
+    // Дежурит: полностью статичен в собранной позе — жив, но ничего не происходит.
+    // Движение в покое только отвлекает; «жив» читается по смене поз при событиях.
     OverlayStatus.Ready -> GhostSpec(
         shell = OverlayColors.TextDim, core = OverlayColors.TextDim,
-        periodSec = 3f, spreadUnits = 0f, burstDeg = 20f, idleDegPerSec = 4f,
-        direction = SpinDirection.Alternate, glow = 0.1f, corePulse = 0.2f,
+        periodSec = 0f, spreadUnits = 0f, burstDeg = 0f, idleDegPerSec = 0f,
     )
 
     // Слушает: проснулся, неглубоко дышит и «вертит головой», эквалайзер ходит волной.
@@ -251,7 +248,10 @@ private class GhostMotion {
     private var prevSpinP = 0f
     private var randDir = 1f
 
-    fun advance(spec: GhostSpec, nowNanos: Long) {
+    /** Спека, которая реально анимируется; новая ждёт границы цикла (см. [advance]). */
+    private var active: GhostSpec? = null
+
+    fun advance(target: GhostSpec, nowNanos: Long) {
         if (lastNanos == 0L) {
             lastNanos = nowNanos
             return
@@ -262,11 +262,38 @@ private class GhostMotion {
         lastNanos = nowNanos
         time += dt
 
+        // Новый статус вступает только после фазы сборки текущего цикла: сегменты сложены,
+        // рывок докручен — и лишь тогда призрак меняет поведение.
+        val current = active
+        val spec = if (current == null || current == target) {
+            active = target
+            target
+        } else {
+            val t = if (current.periodSec > 0f) (clock / current.periodSec).mod(1f) else 1f
+            if (current.periodSec <= 0f || t >= CLOSE_END) {
+                active = target
+                clock = 0f
+                curCycle = 0L
+                prevSpinP = 0f
+                target
+            } else {
+                current
+            }
+        }
+
         if (spec.periodSec <= 0f) {
             envelope = 0f
             coreEnvelope = 0f
-            rotation = (rotation + spec.idleDegPerSec * dt).mod(360f)
             prevSpinP = 0f
+            if (spec.idleDegPerSec != 0f) {
+                rotation = (rotation + spec.idleDegPerSec * dt).mod(360f)
+            } else if (spec.burstDeg == 0f) {
+                // Статичный покой: поворот доезжает до ближайшего кратного 90° и замирает —
+                // у оболочки четырёхлучевая симметрия, это та же собранная поза.
+                val rest = (rotation / 90f).roundToInt() * 90f
+                rotation += (rest - rotation) * min(1f, dt * 10f)
+                if (abs(rest - rotation) < 0.05f) rotation = rest
+            }
             return
         }
         clock += dt
