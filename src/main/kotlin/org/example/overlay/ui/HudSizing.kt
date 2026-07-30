@@ -50,14 +50,6 @@ object HudSizing {
         return (chars * fontSize * CHAR_WIDTH_RATIO + HORIZONTAL_CHROME).coerceIn(MIN_WIDTH, MAX_WIDTH)
     }
 
-    /**
-     * Потолок ширины прозы — колонка в [PROSE_CHARS] символов. Пока первый абзац ответа
-     * дописывается, [width] растёт с каждым словом; кожуху окна на время хода нужна сразу
-     * конечная ширина, иначе каждая дельта дёргала бы границы (см. `HudWindow`).
-     */
-    fun proseWidth(fontSize: Float): Float =
-        (PROSE_CHARS * fontSize * CHAR_WIDTH_RATIO + HORIZONTAL_CHROME).coerceIn(MIN_WIDTH, MAX_WIDTH)
-
     private fun charsOf(block: MdBlock): Int = when (block) {
         is MdBlock.Heading -> minOf(block.text.visualLength, PROSE_CHARS)
         is MdBlock.Paragraph -> minOf(block.text.visualLength, PROSE_CHARS)
