@@ -1,7 +1,6 @@
 package org.example.overlay.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -11,11 +10,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -80,37 +78,51 @@ fun GhostIcon(status: OverlayStatus, modifier: Modifier = Modifier) {
 }
 
 /**
- * Обратный отсчёт до сворачивания HUD: призрак дежурит, а вокруг него по часовой тает дуга.
- * Кольцо — честный таймер (точно видно, сколько осталось), призрак — знак, что оверлей жив.
- * [fraction] — сколько времени осталось, от 1 (полное кольцо) до 0.
+ * Обратный отсчёт до сворачивания HUD. Идёт сразу после «печатает», поэтому стартует в его
+ * акцентном цвете и гасит крылья по очереди — верхнее, правое, нижнее, левое: каждое
+ * погасшее крыло — минус четверть времени. Ядро гаснет вместе с последним крылом, движение —
+ * как у «Готов», так что к нулю призрак плавно приходит ровно к тому виду, в который HUD
+ * и спадает. [fraction] — сколько времени осталось, от 1 до 0.
  */
 @Composable
 fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
-    Box(modifier) {
-        Canvas(Modifier.matchParentSize()) {
-            val s = size.minDimension / VIEWBOX
-            withTransform({
-                translate((size.width - VIEWBOX * s) / 2f, (size.height - VIEWBOX * s) / 2f)
-                scale(s, s, Offset.Zero)
-            }) {
-                val stroke = Stroke(width = RING_STROKE, cap = StrokeCap.Round)
-                val box = Size(RING_RADIUS * 2f, RING_RADIUS * 2f)
-                val topLeft = Offset(CENTRE - RING_RADIUS, CENTRE - RING_RADIUS)
-                drawArc(OverlayColors.TextDim.copy(alpha = 0.25f), 0f, 360f, false, topLeft, box, style = stroke)
-                drawArc(
-                    color = OverlayColors.Accent,
-                    startAngle = -90f,
-                    sweepAngle = 360f * fraction.coerceIn(0f, 1f),
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = box,
-                    style = stroke,
-                )
+    var rotation by remember { mutableFloatStateOf(0f) }
+    var envelope by remember { mutableFloatStateOf(0f) }
+    var coreEnvelope by remember { mutableFloatStateOf(0f) }
+    val motion = remember { GhostMotion() }
+
+    LaunchedEffect(Unit) {
+        var last = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { now ->
+                val dt = ((now - last) / 1_000_000_000f).coerceAtMost(0.1f)
+                last = now
+                motion.advance(COUNTDOWN_SPEC, dt)
+                rotation = motion.rotation
+                envelope = motion.envelope
+                coreEnvelope = motion.coreEnvelope
             }
         }
-        GhostIcon(OverlayStatus.Ready, Modifier.matchParentSize())
+    }
+
+    Canvas(modifier) {
+        val f = fraction.coerceIn(0f, 1f)
+        // Крыло i живёт в своей четверти времени и плавно остывает внутри неё.
+        val shellColors = List(SEGMENT_COUNT) { i ->
+            val warmth = (f * SEGMENT_COUNT - (SEGMENT_COUNT - 1 - i)).coerceIn(0f, 1f)
+            lerp(OverlayColors.TextDim, OverlayColors.Accent, warmth)
+        }
+        val coreColor = lerp(OverlayColors.TextDim, OverlayColors.Accent, (f * SEGMENT_COUNT).coerceIn(0f, 1f))
+        drawGhost(COUNTDOWN_SPEC, rotation, envelope, coreEnvelope, shellColors, coreColor)
     }
 }
+
+/** Движение отсчёта — как у «Готов»: HUD спадает в пилюлю без смены пластики. */
+private val COUNTDOWN_SPEC = GhostSpec(
+    shell = OverlayColors.Accent, core = OverlayColors.Accent,
+    periodSec = 3f, spreadUnits = 0f, burstDeg = 20f, idleDegPerSec = 4f,
+    direction = SpinDirection.Alternate, glow = 0.2f, corePulse = 0.2f,
+)
 
 /** Направление рывков оболочки. */
 private enum class SpinDirection {
@@ -292,7 +304,15 @@ private fun easeOut(x: Float) = 1f - (1f - x).pow(3)
 private fun easeInOut(x: Float) =
     if (x < 0.5f) 4f * x * x * x else 1f - ((-2f * x + 2f).pow(3)) / 2f
 
-private fun DrawScope.drawGhost(spec: GhostSpec, rotation: Float, envelope: Float, coreEnvelope: Float) {
+private fun DrawScope.drawGhost(
+    spec: GhostSpec,
+    rotation: Float,
+    envelope: Float,
+    coreEnvelope: Float,
+    /** Цвета крыльев по одному, если они разошлись (отсчёт); null — все цветом [GhostSpec.shell]. */
+    shellColors: List<Color>? = null,
+    coreColor: Color = spec.core,
+) {
     val s = size.minDimension / VIEWBOX
     val spread = spec.spreadUnits * envelope
     // Оболочка светится с раскрытием, ядро — со своим ритмом (при сердцебиении они разные).
@@ -307,10 +327,11 @@ private fun DrawScope.drawGhost(spec: GhostSpec, rotation: Float, envelope: Floa
         scale(s, s, Offset.Zero)
     }) {
         rotate(rotation, pivot = Offset(CENTRE, CENTRE)) {
-            for ((path, direction) in shellSegments) {
+            shellSegments.forEachIndexed { index, (path, direction) ->
+                val color = shellColors?.get(index) ?: spec.shell
                 translate(direction.x * spread, direction.y * spread) {
-                    if (shellGlow > 0.03f) drawGlowPath(path, spec.shell, shellGlow, shellSigma)
-                    drawPath(path, spec.shell)
+                    if (shellGlow > 0.03f) drawGlowPath(path, color, shellGlow, shellSigma)
+                    drawPath(path, color)
                 }
             }
         }
@@ -318,15 +339,15 @@ private fun DrawScope.drawGhost(spec: GhostSpec, rotation: Float, envelope: Floa
         if (spec.coreHollow) {
             // Погасшее ядро: пустое кольцо — призрак «выключен».
             drawCircle(
-                color = spec.core,
+                color = coreColor,
                 radius = CORE_RADIUS,
                 center = Offset(CENTRE, CENTRE),
                 style = Stroke(width = HOLLOW_STROKE),
             )
         } else {
             val radius = CORE_RADIUS + CORE_PULSE * spec.corePulse * (coreEnvelope * 2f - 1f)
-            if (coreGlow > 0.03f) drawGlowCircle(radius, spec.core, coreGlow, coreSigma)
-            drawCircle(color = spec.core, radius = radius, center = Offset(CENTRE, CENTRE))
+            if (coreGlow > 0.03f) drawGlowCircle(radius, coreColor, coreGlow, coreSigma)
+            drawCircle(color = coreColor, radius = radius, center = Offset(CENTRE, CENTRE))
         }
     }
 }
@@ -371,9 +392,7 @@ private const val CLOSE_END = 0.82f
 /** Радиус размытия свечения на полной силе, в единицах вьюбокса. */
 private const val GLOW_SIGMA_UNITS = 42f
 
-/** Кольцо обратного отсчёта вокруг призрака. */
-private const val RING_RADIUS = 452f
-private const val RING_STROKE = 22f
+private const val SEGMENT_COUNT = 4
 
 /**
  * Пути сегментов из SVG и направление «выдоха» каждого — от центра наружу.

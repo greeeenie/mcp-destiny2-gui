@@ -466,9 +466,9 @@ fun HudWindow(state: AppState) {
                                     animationSpec = tween(ICON_FADE_MS),
                                 ) { (counting, current) ->
                                     if (counting) {
-                                        GhostCountdownIcon(collapseFraction ?: 1f, Modifier.size(18.dp))
+                                        GhostCountdownIcon(collapseFraction ?: 1f, Modifier.size(24.dp))
                                     } else {
-                                        HudStatusIcon(current, Modifier.size(18.dp))
+                                        HudStatusIcon(current, Modifier.size(24.dp))
                                     }
                                 }
                             }
