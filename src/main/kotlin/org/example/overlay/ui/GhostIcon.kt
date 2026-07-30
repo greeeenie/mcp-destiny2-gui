@@ -96,48 +96,70 @@ fun GhostIcon(status: OverlayStatus, micLevel: Float = 0f, modifier: Modifier = 
 @Composable
 fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
     var prof by remember { mutableFloatStateOf(sharedMotion.prof) }
+    val fractionNow by rememberUpdatedState(fraction)
+
+    // Сколько времени оставалось в момент, когда пружина реально остановилась:
+    // мотор докручивает цикл «печатает» до границы, и запускать волну поверх
+    // ещё крутящихся крыльев нельзя — выглядит как два несогласованных слоя.
+    var igniteStart by remember { mutableFloatStateOf(Float.NaN) }
 
     LaunchedEffect(Unit) {
         while (true) {
             withFrameNanos { now ->
                 sharedMotion.advance(COUNTDOWN_SPEC, now)
                 prof = sharedMotion.prof
+                if (igniteStart.isNaN() && sharedMotion.settled) {
+                    igniteStart = fractionNow.coerceIn(0.01f, 1f)
+                }
             }
         }
     }
 
     Canvas(modifier) {
         val f = fraction.coerceIn(0f, 1f)
-        // Каскадное зажигание: из «печатает» крылья приходят серыми и загораются волной
-        // по кругу (верх → право → низ → лево) за первую десятую отсчёта — вместо
-        // резкой общей вспышки. Волна и дальнейшее гашение идут в одном порядке.
-        val ignite = ((1f - f) / IGNITE_FRACTION).coerceIn(0f, 1f)
-        val wingColors = List(WING_COUNT) { i ->
-            if (ignite < 1f) {
-                lerp(
-                    OverlayColors.TextDim, OverlayColors.Accent,
-                    (ignite * WING_COUNT - i).coerceIn(0f, 1f),
-                )
-            } else {
-                // Четверть крыла: > 1 — очередь не дошла, 0..1 — мигает, <= 0 — погасло.
-                val q = f * WING_COUNT - (WING_COUNT - 1 - i)
-                when {
-                    q >= 1f -> OverlayColors.Accent
-                    q <= 0f -> OverlayColors.TextDim
-                    // Чётные отрезки — синий, нечётные — серый; последний отрезок нечётный,
-                    // поэтому крыло всегда догорает в сером и гаснет без скачка.
-                    else -> if (((1f - q) * BLINK_SEGMENTS).toInt() % 2 == 0) {
-                        OverlayColors.Accent
-                    } else {
-                        OverlayColors.TextDim
+        val start = igniteStart
+        val wingColors: List<Color>
+        val coreColor: Color
+        if (start.isNaN()) {
+            // Пружина ещё докручивает цикл: крылья серые, как в «печатает», ядро горит.
+            wingColors = List(WING_COUNT) { OverlayColors.TextDim }
+            coreColor = OverlayColors.Accent
+        } else {
+            // Вся цветовая партитура укладывается в оставшееся с момента остановки
+            // время: ef идёт от 1 к 0, как обычный fraction, только без хвоста мотора.
+            val ef = (f / start).coerceIn(0f, 1f)
+            // Каскадное зажигание: крылья загораются волной по кругу (верх → право →
+            // низ → лево) за первую десятую отсчёта — вместо резкой общей вспышки.
+            // Волна и дальнейшее гашение идут в одном порядке.
+            val ignite = ((1f - ef) / IGNITE_FRACTION).coerceIn(0f, 1f)
+            wingColors = List(WING_COUNT) { i ->
+                if (ignite < 1f) {
+                    lerp(
+                        OverlayColors.TextDim, OverlayColors.Accent,
+                        (ignite * WING_COUNT - i).coerceIn(0f, 1f),
+                    )
+                } else {
+                    // Четверть крыла: > 1 — очередь не дошла, 0..1 — мигает, <= 0 — погасло.
+                    val q = ef * WING_COUNT - (WING_COUNT - 1 - i)
+                    when {
+                        q >= 1f -> OverlayColors.Accent
+                        q <= 0f -> OverlayColors.TextDim
+                        // Чётные отрезки — синий, нечётные — серый; последний отрезок нечётный,
+                        // поэтому крыло всегда догорает в сером и гаснет без скачка.
+                        else -> if (((1f - q) * BLINK_SEGMENTS).toInt() % 2 == 0) {
+                            OverlayColors.Accent
+                        } else {
+                            OverlayColors.TextDim
+                        }
                     }
                 }
             }
+            coreColor = lerp(OverlayColors.TextDim, OverlayColors.Accent, (ef * WING_COUNT).coerceIn(0f, 1f))
         }
         drawGhost(
             COUNTDOWN_SPEC, prof, clock = 0f, level = 0f,
             wingColors = wingColors,
-            coreColor = lerp(OverlayColors.TextDim, OverlayColors.Accent, (f * WING_COUNT).coerceIn(0f, 1f)),
+            coreColor = coreColor,
         )
     }
 }
@@ -259,6 +281,10 @@ private class GhostMotion {
 
     /** Спека, которая реально анимируется; новая ждёт границы цикла (см. [advance]). */
     private var active: GhostSpec? = null
+
+    /** Движения нет: активная спека статична, пружина в собранной позе. */
+    val settled: Boolean
+        get() = active?.let { it.periodSec <= 0f } ?: false
 
     fun advance(target: GhostSpec, nowNanos: Long) {
         if (lastNanos == 0L) {
