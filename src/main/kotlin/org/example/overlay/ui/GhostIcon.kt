@@ -360,7 +360,6 @@ private fun DrawScope.drawGhost(
         }
 
         // Скобки контрят пружину полуоборотом навстречу; радар добавляет свой ход.
-        // База 90°: в логотипе ядро покоится повёрнутым — скобки сверху и снизу круга.
         rotate(CORE_BASE_DEG + 180f * prof + brSpin, pivot = Offset(CORE_CX, CORE_CY)) {
             translate(-brSpread, 0f) { drawPath(bracketLeft, coreColor) }
             translate(brSpread, 0f) { drawPath(bracketRight, coreColor) }
@@ -420,8 +419,8 @@ private const val BANG_DOT_R = 17f
 
 private const val WING_COUNT = 4
 
-/** Базовый поворот ядра в покое: кейфреймы исходника идут 90° → 270°. */
-private const val CORE_BASE_DEG = 90f
+/** Базовый поворот ядра в покое: скобки по бокам круга (исходник повёрнут на 90°). */
+private const val CORE_BASE_DEG = 0f
 
 /** Пружинный цикл длиннее базового периода статуса (в исходнике полный цикл 2.55 с). */
 private const val SPRING_CYCLE = 1.8f
