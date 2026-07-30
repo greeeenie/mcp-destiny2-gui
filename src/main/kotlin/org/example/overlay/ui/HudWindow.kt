@@ -134,6 +134,9 @@ private const val LEVEL_ANIM_MS = 100
  * нужно больше места, окно одним скачком становится «кожухом», покрывающим панель в начале
  * и в конце пути, панель плывёт внутри композной анимацией, и вторым скачком кожух ужимается.
  * Оба скачка не двигают видимых пикселей — панель в эти моменты совпадает с краем кожуха.
+ * Во время хода ответ дописывается кусками и цель растёт на каждом, поэтому кожух встаёт
+ * сразу максимальным на весь ход: границы окна меняются один раз в его начале, а не на
+ * каждый кусок текста. Кликабельную область при этом сужает форма окна — до видимой панели.
  *
  * `focusable = false` — ключевое свойство: без него клик по HUD отбирает фокус у Destiny 2
  * и персонаж перестаёт слушаться WASD. Мышиные события в нефокусируемое окно AWT доставляет
@@ -246,12 +249,41 @@ fun HudWindow(state: AppState) {
             mutableStateOf(ScreenPlacement.anchors(placement.x, placement.y, HudSizing.MIN_WIDTH, HudSizing.MIN_HEIGHT))
         }
 
-        LaunchedEffect(expanded, targetWidth, targetHeight) {
+        LaunchedEffect(expanded, targetWidth, targetHeight, turnActive) {
             val position = windowState.position as? WindowPosition.Absolute ?: return@LaunchedEffect
             val size = windowState.size
 
+            // Окно покоя и хит-бокс. Обычно окно покоя — сама панель, но не меньше полосы,
+            // чтобы разворот пилюли в полосу обходился без изменения границ. Во время хода
+            // окно встаёт кожухом сразу максимального размера: растущий ответ больше не
+            // трогает границы, а кликабельную область сужает форма окна до видимой панели —
+            // вне формы Windows пропускает клики насквозь. Форма прямоугольная, а не
+            // скруглённая: регион режется без сглаживания и грубые углы уже обжигали.
+            fun settle(panelLeft: Float, panelTop: Float) {
+                val restW = max(targetWidth, if (turnActive) HudSizing.MAX_WIDTH else HudSizing.MIN_WIDTH)
+                val restH = max(targetHeight, if (turnActive) HudSizing.MAX_HEIGHT else HudSizing.MIN_HEIGHT)
+                val restX = if (anchors.end) panelLeft + targetWidth - restW else panelLeft
+                val restY = if (anchors.bottom) panelTop + targetHeight - restH else panelTop
+                val current = windowState.position
+                val moved = current !is WindowPosition.Absolute ||
+                    current.x.value != restX || current.y.value != restY ||
+                    windowState.size.width.value != restW || windowState.size.height.value != restH
+                if (moved) {
+                    // Панель стоит у якорного края кожуха, поэтому скачок границ невидим.
+                    windowState.position = WindowPosition(restX.dp, restY.dp)
+                    windowState.size = DpSize(restW.dp, restH.dp)
+                }
+                window.shape = Rectangle2D.Double(
+                    if (anchors.end) (restW - targetWidth).toDouble() else 0.0,
+                    if (anchors.bottom) (restH - targetHeight).toDouble() else 0.0,
+                    targetWidth.toDouble(),
+                    targetHeight.toDouble(),
+                )
+            }
+
             // Откуда стартуем. В покое пилюля стоит в якорном углу окна, развёрнутая панель
-            // совпадает с окном; посреди прерванной анимации — текущие значения панели.
+            // прижата к якорному краю (окно может быть кожухом шире неё); посреди прерванной
+            // анимации — текущие значения панели.
             val startX: Float
             val startY: Float
             val startW: Float
@@ -272,19 +304,26 @@ fun HudWindow(state: AppState) {
                 }
 
                 else -> {
-                    startX = position.x.value
-                    startY = position.y.value
-                    startW = size.width.value
-                    startH = size.height.value
+                    // Размеры панели — свои (окно-кожух шире), позиция — от якорного края
+                    // окна: перетаскивание двигает окно, и панель обязана ехать за ним.
+                    startW = panelW.value
+                    startH = panelH.value
+                    startX = if (anchors.end) position.x.value + size.width.value - startW else position.x.value
+                    startY = if (anchors.bottom) position.y.value + size.height.value - startH else position.y.value
                 }
             }
-            if (!animating && startW == targetWidth && startH == targetHeight) return@LaunchedEffect
+            if (!animating && startW == targetWidth && startH == targetHeight) {
+                // Панель уже на месте — осталось привести окно покоя и хит-бокс:
+                // кожух хода ставится и снимается именно здесь.
+                settle(startX, startY)
+                return@LaunchedEffect
+            }
 
             // Якорь считается по панели до пересчёта цели: так старт и цель прижаты к одному краю.
             anchors = ScreenPlacement.anchors(startX, startY, startW, startH)
             val target = ScreenPlacement.resize(startX, startY, startW, startH, targetWidth, targetHeight)
 
-            // Кожух: прямоугольник, покрывающий панель в начале и в конце пути.
+            // Кожух пути: прямоугольник, покрывающий панель в начале и в конце движения.
             val hullX = min(startX, target.x)
             val hullY = min(startY, target.y)
             val hullW = max(startX + startW, target.x + targetWidth) - hullX
@@ -296,16 +335,33 @@ fun HudWindow(state: AppState) {
             panelH.snapTo(startH)
             animating = true
 
-            val boundsChange = hullX != position.x.value || hullY != position.y.value ||
-                hullW != size.width.value || hullH != size.height.value
-            if (boundsChange) {
+            // Если окно уже покрывает весь путь (кожух хода стоит с прошлого куска ответа),
+            // границы не трогаются вовсе — в этом и смысл кожуха: ноль морганий на стриме.
+            val covered = hullX >= position.x.value && hullY >= position.y.value &&
+                hullX + hullW <= position.x.value + size.width.value &&
+                hullY + hullH <= position.y.value + size.height.value
+            val winX: Float
+            val winY: Float
+            if (covered) {
+                winX = position.x.value
+                winY = position.y.value
+            } else {
                 windowState.position = WindowPosition(hullX.dp, hullY.dp)
                 windowState.size = DpSize(hullW.dp, hullH.dp)
+                winX = hullX
+                winY = hullY
                 // Пара кадров на то, чтобы нативное окно применило границы и перерисовалось:
                 // если начать двигать панель сразу, первый кадр придётся на старый буфер.
                 withFrameNanos { }
                 withFrameNanos { }
             }
+            // Хит-бокс на время движения — весь путь панели (не больше окна).
+            window.shape = Rectangle2D.Double(
+                (hullX - winX).toDouble(),
+                (hullY - winY).toDouble(),
+                hullW.toDouble(),
+                hullH.toDouble(),
+            )
 
             if (expanded) {
                 showPill = false
@@ -332,35 +388,8 @@ fun HudWindow(state: AppState) {
                 showPill = true
             }
 
-            // Окно покоя: сама панель, но не меньше полосы — чтобы следующий разворот пилюли
-            // в полосу снова обошёлся без единого изменения границ. Панель уже стоит на целевом
-            // месте у якорного края, поэтому этот скачок ничего не двигает на экране.
-            val restW = max(targetWidth, HudSizing.MIN_WIDTH)
-            val restH = max(targetHeight, HudSizing.MIN_HEIGHT)
-            val restX = if (anchors.end) target.x + targetWidth - restW else target.x
-            val restY = if (anchors.bottom) target.y + targetHeight - restH else target.y
-            windowState.position = WindowPosition(restX.dp, restY.dp)
-            windowState.size = DpSize(restW.dp, restH.dp)
+            settle(target.x, target.y)
             animating = false
-        }
-
-        // Хит-бокс окна повторяет видимую панель. Окно в покое всегда размером с полосу,
-        // и без формы его прозрачная часть перехватывала бы клики по игре и по чужим окнам
-        // рядом с пилюлей. Вне формы Windows пропускает клики насквозь, поэтому в пилюльном
-        // покое кликабелен только квадрат пилюли в якорном углу. Форма прямоугольная,
-        // а не скруглённая: регион режется без сглаживания и грубые углы уже обжигали.
-        LaunchedEffect(animating, showPill, anchors, windowState.size) {
-            window.shape = if (showPill && !animating) {
-                val pill = HudSizing.COLLAPSED.toDouble()
-                Rectangle2D.Double(
-                    if (anchors.end) windowState.size.width.value - pill else 0.0,
-                    if (anchors.bottom) windowState.size.height.value - pill else 0.0,
-                    pill,
-                    pill,
-                )
-            } else {
-                null
-            }
         }
 
         OverlayTheme {
@@ -401,7 +430,11 @@ fun HudWindow(state: AppState) {
                         .align(anchorAlignment)
                         .size(HudSizing.COLLAPSED.dp)
 
-                    else -> Modifier.fillMaxSize()
+                    // Окно в покое может стоять кожухом шире панели (стрим): панель держит
+                    // свой целевой размер у якорного угла, а не растягивается на всё окно.
+                    else -> Modifier
+                        .align(anchorAlignment)
+                        .size(targetWidth.dp, targetHeight.dp)
                 }
 
                 Box(
