@@ -26,8 +26,10 @@ import androidx.compose.ui.graphics.vector.PathParser
 import org.example.overlay.app.OverlayStatus
 import org.jetbrains.skia.FilterBlurMode
 import org.jetbrains.skia.MaskFilter
+import kotlin.math.PI
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.sin
 import kotlin.random.Random
 
 /**
@@ -49,12 +51,14 @@ fun GhostIcon(status: OverlayStatus, modifier: Modifier = Modifier) {
 
     var rotation by remember { mutableFloatStateOf(0f) }
     var envelope by remember { mutableFloatStateOf(0f) }
+    var coreEnvelope by remember { mutableFloatStateOf(0f) }
     val motion = remember { GhostMotion() }
 
     LaunchedEffect(spec) {
         if (spec.periodSec == 0f && spec.idleDegPerSec == 0f) {
             // Мёртвые статусы: призрак замирает как есть, кадры не жжём.
             envelope = 0f
+            coreEnvelope = 0f
             return@LaunchedEffect
         }
         var last = withFrameNanos { it }
@@ -65,12 +69,13 @@ fun GhostIcon(status: OverlayStatus, modifier: Modifier = Modifier) {
                 motion.advance(spec, dt)
                 rotation = motion.rotation
                 envelope = motion.envelope
+                coreEnvelope = motion.coreEnvelope
             }
         }
     }
 
     Canvas(modifier) {
-        drawGhost(spec, rotation, envelope)
+        drawGhost(spec, rotation, envelope, coreEnvelope)
     }
 }
 
@@ -138,6 +143,11 @@ private data class GhostSpec(
     val flareBoost: Float = 1.6f,
     /** Амплитуда дыхания ядра, 0..1 от [CORE_PULSE]. Ядро — про голос, оболочка — про работу. */
     val corePulse: Float = 0f,
+    /**
+     * Свой ритм ядра вместо дыхания в такт оболочке: «два удара → кулдаун», как сердцебиение.
+     * Значение — период всего ритма в секундах; 0 — ядро дышит вместе с циклом оболочки.
+     */
+    val coreBeatPeriodSec: Float = 0f,
     /** Ядро кольцом вместо заливки — статусы, где линия мертва. */
     val coreHollow: Boolean = false,
 )
@@ -147,26 +157,26 @@ private data class GhostSpec(
  * процесс, ядро — про голос, редкая вспышка — «я живой», полный замер — «я умер».
  */
 private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
-    // Дежурит: редкие неглубокие циклы, еле заметный доворот — жив, но ничего не происходит.
+    // Дежурит: сегменты не расходятся, только тихое покачивание ±20° — жив, но ничего не происходит.
     OverlayStatus.Ready -> GhostSpec(
         shell = OverlayColors.TextDim, core = OverlayColors.TextDim,
-        periodSec = 2.6f, spreadUnits = 26f, burstDeg = 45f, idleDegPerSec = 6f,
-        glow = 0.1f, corePulse = 0.2f,
+        periodSec = 3f, spreadUnits = 0f, burstDeg = 20f, idleDegPerSec = 4f,
+        direction = SpinDirection.Alternate, glow = 0.1f, corePulse = 0.2f,
     )
 
-    // Слушает: проснулся, дышит раз в секунду, «вертит головой»; вспышка — «всё ещё слушаю».
+    // Слушает: проснулся, неглубоко дышит и «вертит головой», ядро ходит в такт.
     OverlayStatus.Listening -> GhostSpec(
         shell = OverlayColors.Ok, core = OverlayColors.Ok,
-        periodSec = 1.1f, spreadUnits = 56f, burstDeg = 90f, idleDegPerSec = 12f,
-        direction = SpinDirection.Alternate, glow = 0.4f, flareEveryN = 4, flareBoost = 1.7f,
-        corePulse = 0.6f,
+        periodSec = 1.3f, spreadUnits = 18f, burstDeg = 20f, idleDegPerSec = 0f,
+        direction = SpinDirection.Alternate, glow = 0.55f, corePulse = 0.6f,
     )
 
-    // Думает: самый быстрый и хаотичный режим — полуобороты в непредсказуемую сторону.
+    // Думает: самый быстрый режим — широкие полуобороты туда-сюда, светится на каждом цикле.
     OverlayStatus.Thinking -> GhostSpec(
         shell = OverlayColors.Accent, core = OverlayColors.Accent,
-        periodSec = 0.7f, spreadUnits = 62f, burstDeg = 180f, idleDegPerSec = 24f,
-        direction = SpinDirection.Random, glow = 0.5f, corePulse = 0.3f,
+        periodSec = 0.8f, spreadUnits = 62f, burstDeg = 180f, idleDegPerSec = 24f,
+        direction = SpinDirection.Alternate, glow = 0.65f, flareEveryN = 1, flareBoost = 1.4f,
+        corePulse = 0.3f,
     )
 
     // Стучится: ровные методичные обороты в одну сторону — попытка за попыткой.
@@ -176,11 +186,12 @@ private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
         glow = 0.25f, corePulse = 0.25f,
     )
 
-    // Говорит: оболочка собрана и спокойна, акцент на ядре — оно частит, как индикатор голоса.
+    // Говорит: оболочка ровно плывёт с мелкой рябью, а ядро бьётся своим ритмом —
+    // два удара, кулдаун, снова два удара, как речь с паузами.
     OverlayStatus.Answering, OverlayStatus.Speaking -> GhostSpec(
         shell = OverlayColors.Accent, core = OverlayColors.Accent,
-        periodSec = 0.9f, spreadUnits = 30f, burstDeg = 45f, idleDegPerSec = 10f,
-        direction = SpinDirection.Alternate, glow = 0.55f, corePulse = 0.9f,
+        periodSec = 0.2f, spreadUnits = 16f, burstDeg = 0f, idleDegPerSec = 70f,
+        glow = 0.65f, flareBoost = 2.1f, corePulse = 0.9f, coreBeatPeriodSec = 1.2f,
     )
 
     // Линия мертва: единственные статусы без движения вообще, ядро гаснет до кольца.
@@ -201,6 +212,8 @@ private class GhostMotion {
         private set
     var envelope = 0f
         private set
+    var coreEnvelope = 0f
+        private set
 
     private var clock = 0f
     private var curCycle = 0L
@@ -210,6 +223,7 @@ private class GhostMotion {
     fun advance(spec: GhostSpec, dt: Float) {
         if (spec.periodSec <= 0f) {
             envelope = 0f
+            coreEnvelope = 0f
             rotation = (rotation + spec.idleDegPerSec * dt).mod(360f)
             prevSpinP = 0f
             return
@@ -245,6 +259,14 @@ private class GhostMotion {
         }
         envelope = env * flare
 
+        coreEnvelope = if (spec.coreBeatPeriodSec > 0f) {
+            // Сердцебиение: sin² на активной части периода даёт ровно два удара, дальше кулдаун.
+            val beat = (clock / spec.coreBeatPeriodSec).mod(1f)
+            if (beat < BEAT_ACTIVE) sin(beat / BEAT_ACTIVE * 2f * PI.toFloat()).pow(2) else 0f
+        } else {
+            envelope
+        }
+
         if (cycles != curCycle) {
             // Хвост прошлого цикла докручивается его же направлением, и только потом смена.
             rotation += spec.burstDeg * direction(spec, curCycle) * (1f - prevSpinP)
@@ -270,12 +292,15 @@ private fun easeOut(x: Float) = 1f - (1f - x).pow(3)
 private fun easeInOut(x: Float) =
     if (x < 0.5f) 4f * x * x * x else 1f - ((-2f * x + 2f).pow(3)) / 2f
 
-private fun DrawScope.drawGhost(spec: GhostSpec, rotation: Float, envelope: Float) {
+private fun DrawScope.drawGhost(spec: GhostSpec, rotation: Float, envelope: Float, coreEnvelope: Float) {
     val s = size.minDimension / VIEWBOX
     val spread = spec.spreadUnits * envelope
-    val glowVal = spec.glow * envelope
+    // Оболочка светится с раскрытием, ядро — со своим ритмом (при сердцебиении они разные).
+    val shellGlow = spec.glow * envelope
+    val coreGlow = spec.glow * coreEnvelope
     // Blur у Skia — в пикселях устройства, поэтому радиус приводится к размеру холста.
-    val glowSigma = glowVal * GLOW_SIGMA_UNITS * s
+    val shellSigma = shellGlow * GLOW_SIGMA_UNITS * s
+    val coreSigma = coreGlow * GLOW_SIGMA_UNITS * s
 
     withTransform({
         translate((size.width - VIEWBOX * s) / 2f, (size.height - VIEWBOX * s) / 2f)
@@ -284,7 +309,7 @@ private fun DrawScope.drawGhost(spec: GhostSpec, rotation: Float, envelope: Floa
         rotate(rotation, pivot = Offset(CENTRE, CENTRE)) {
             for ((path, direction) in shellSegments) {
                 translate(direction.x * spread, direction.y * spread) {
-                    if (glowVal > 0.03f) drawGlowPath(path, spec.shell, glowVal, glowSigma)
+                    if (shellGlow > 0.03f) drawGlowPath(path, spec.shell, shellGlow, shellSigma)
                     drawPath(path, spec.shell)
                 }
             }
@@ -299,8 +324,8 @@ private fun DrawScope.drawGhost(spec: GhostSpec, rotation: Float, envelope: Floa
                 style = Stroke(width = HOLLOW_STROKE),
             )
         } else {
-            val radius = CORE_RADIUS + CORE_PULSE * spec.corePulse * (envelope * 2f - 1f)
-            if (glowVal > 0.03f) drawGlowCircle(radius, spec.core, glowVal, glowSigma)
+            val radius = CORE_RADIUS + CORE_PULSE * spec.corePulse * (coreEnvelope * 2f - 1f)
+            if (coreGlow > 0.03f) drawGlowCircle(radius, spec.core, coreGlow, coreSigma)
             drawCircle(color = spec.core, radius = radius, center = Offset(CENTRE, CENTRE))
         }
     }
@@ -330,10 +355,13 @@ private fun glowPaint(color: Color, glow: Float, sigma: Float): Paint {
 private const val VIEWBOX = 965f
 private const val CENTRE = VIEWBOX / 2f
 
-/** Ядро поменьше: пока внутри ничего не показываем, крупный круг только спорит с оболочкой. */
-private const val CORE_RADIUS = 105f
-private const val CORE_PULSE = 24f
+/** Ядро и размах его пульса — подобраны на стенде. */
+private const val CORE_RADIUS = 144f
+private const val CORE_PULSE = 60f
 private const val HOLLOW_STROKE = 38f
+
+/** Доля периода сердцебиения, занятая двумя ударами; остаток — кулдаун. */
+private const val BEAT_ACTIVE = 0.6f
 
 /** Доли периода на фазы цикла: раскрытие держится всю «крутку» и складывается после. */
 private const val OPEN_END = 0.22f
