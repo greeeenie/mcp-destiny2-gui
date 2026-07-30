@@ -149,6 +149,13 @@ private data class GhostSpec(
     /** Фоновое вращение между рывками, градусов в секунду. */
     val idleDegPerSec: Float,
     val direction: SpinDirection = SpinDirection.Clockwise,
+    /**
+     * Множители вращения двух колец оболочки: вертикальные шевроны (верх/низ) и
+     * горизонтальные (лево/право). Разные знаки — встречное вращение «шестерёнками»,
+     * 0 останавливает кольцо, модуль — относительная скорость.
+     */
+    val spinV: Float = -1f,
+    val spinH: Float = 1f,
     /** Сила свечения на раскрытии, 0..1. */
     val glow: Float = 0f,
     /** Каждый N-й цикл — вспышка: шире и ярче. 0 — без вспышек. */
@@ -351,11 +358,12 @@ private fun DrawScope.drawGhost(
         translate((size.width - VIEW_W * s) / 2f, (size.height - VIEW_H * s) / 2f)
         scale(s, s, Offset.Zero)
     }) {
-        // Два контр-вращающихся кольца, как шестерёнки: вертикальные шевроны крутятся
-        // против горизонтальных — знак у каждого сегмента свой.
+        // Два кольца оболочки с независимыми множителями вращения: разные знаки дают
+        // встречное движение «шестерёнками», ноль замораживает кольцо.
         shellSegments.forEachIndexed { index, segment ->
             val color = chevronColors?.get(index / 2) ?: spec.shell
-            rotate(rotation * segment.spin, pivot = Offset(CX, CY)) {
+            val spin = if (segment.vertical) spec.spinV else spec.spinH
+            rotate(rotation * spin, pivot = Offset(CX, CY)) {
                 translate(segment.dir.x * spread, segment.dir.y * spread) {
                     if (shellGlow > 0.03f) drawGlowPath(segment.path, color, shellGlow, shellSigma)
                     drawPath(segment.path, color)
@@ -460,25 +468,25 @@ private const val EQ_WAVE_DEPTH = 0.7f
 /** Дыхание глаза: размах масштаба на полном пульсе. */
 private const val EYE_PULSE = 0.3f
 
-/** Сегмент оболочки: контур, направление «выдоха» от центра и знак вращения своего кольца. */
-private class ShellSegment(val path: Path, val dir: Offset, val spin: Float)
+/** Сегмент оболочки: контур, направление «выдоха» от центра и кольцо (вертикальное/горизонтальное). */
+private class ShellSegment(val path: Path, val dir: Offset, val vertical: Boolean)
 
 /**
  * Сегменты оболочки: четыре шеврона по два куска, порядок — верх, право, низ, лево
- * (тем же порядком гаснут при отсчёте). Вертикальные шевроны крутятся против горизонтальных.
+ * (тем же порядком гаснут при отсчёте). Множители вращения колец — [GhostSpec.spinV]/[GhostSpec.spinH].
  */
 private val shellSegments: List<ShellSegment> by lazy {
-    fun seg(data: String, dir: Offset, spin: Float) =
-        ShellSegment(PathParser().parsePathString(data).toPath(), dir, spin)
+    fun seg(data: String, dir: Offset, vertical: Boolean) =
+        ShellSegment(PathParser().parsePathString(data).toPath(), dir, vertical)
     listOf(
-        seg("M141.5 75L114.5 98L69.5 54L117.5 0H147V75H141.5Z", Offset(0f, -1f), -1f),
-        seg("M152.5 75L179.5 98L224.5 54L176.5 0H147V75H152.5Z", Offset(0f, -1f), -1f),
-        seg("M293.5 117.5V129H204L182 101L227 56.5L293.5 117.5Z", Offset(1f, 0f), 1f),
-        seg("M293.5 152V140.5H204L182 168.5L227 213L293.5 152Z", Offset(1f, 0f), 1f),
-        seg("M141.5 193.5L114.5 170.5L69.5 214.5L117.5 268.5H147V193.5H141.5Z", Offset(0f, 1f), -1f),
-        seg("M152.5 193.5L179.5 170.5L224.5 214.5L176.5 268.5H147V193.5H152.5Z", Offset(0f, 1f), -1f),
-        seg("M0 151.5V140H89.5L111.5 168L66.5 212.5L0 151.5Z", Offset(-1f, 0f), 1f),
-        seg("M0 117.5V129H89.5L111.5 101L66.5 56.5L0 117.5Z", Offset(-1f, 0f), 1f),
+        seg("M141.5 75L114.5 98L69.5 54L117.5 0H147V75H141.5Z", Offset(0f, -1f), true),
+        seg("M152.5 75L179.5 98L224.5 54L176.5 0H147V75H152.5Z", Offset(0f, -1f), true),
+        seg("M293.5 117.5V129H204L182 101L227 56.5L293.5 117.5Z", Offset(1f, 0f), false),
+        seg("M293.5 152V140.5H204L182 168.5L227 213L293.5 152Z", Offset(1f, 0f), false),
+        seg("M141.5 193.5L114.5 170.5L69.5 214.5L117.5 268.5H147V193.5H141.5Z", Offset(0f, 1f), true),
+        seg("M152.5 193.5L179.5 170.5L224.5 214.5L176.5 268.5H147V193.5H152.5Z", Offset(0f, 1f), true),
+        seg("M0 151.5V140H89.5L111.5 168L66.5 212.5L0 151.5Z", Offset(-1f, 0f), false),
+        seg("M0 117.5V129H89.5L111.5 101L66.5 56.5L0 117.5Z", Offset(-1f, 0f), false),
     )
 }
 
