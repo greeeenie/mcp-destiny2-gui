@@ -1,156 +1,351 @@
 package org.example.overlay.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.vector.PathParser
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.withFrameNanos
 import org.example.overlay.app.OverlayStatus
-import kotlin.math.PI
-import kotlin.math.sin
+import org.jetbrains.skia.FilterBlurMode
+import org.jetbrains.skia.MaskFilter
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.random.Random
 
 /**
  * Живой призрак вместо набора статусных значков: четыре сегмента оболочки (контуры — из
- * фирменного логотипа) крутятся вокруг ядра, как у призрака в игре. Статус читается по
- * поведению, а не по форме: цвет, скорость вращения и дыхание ядра.
+ * фирменного логотипа) движутся вокруг ядра, как у призрака в игре.
  *
- * Угол и фаза пульса живут в [remember] и накапливаются по кадрам, а не через
- * `infiniteRepeatable`: при смене статуса меняется только скорость, и оболочка продолжает
- * вращение с того же места — без рывка. У «мёртвых» статусов скорость нулевая, призрак
- * просто замирает как есть.
+ * Движение импульсное, а не непрерывное: цикл «раскрылся → крутанулся → собрался → отдых»
+ * с периодом [GhostSpec.periodSec]. Статус читается по трём каналам — цвет, темп цикла и
+ * характер вращения; смысл каждого статуса расписан у [ghostSpec].
+ *
+ * Угол и часы цикла живут в [GhostMotion] и накапливаются приращениями по кадрам: при смене
+ * статуса меняются только коэффициенты, и оболочка продолжает движение с того же места без
+ * рывка. Хвост рывка на границе цикла докручивается направлением старого цикла, поэтому
+ * чередование и случайные направления тоже бесшовны.
  */
 @Composable
 fun GhostIcon(status: OverlayStatus, modifier: Modifier = Modifier) {
     val spec = ghostSpec(status)
 
     var rotation by remember { mutableFloatStateOf(0f) }
-    var pulsePhase by remember { mutableFloatStateOf(0f) }
+    var envelope by remember { mutableFloatStateOf(0f) }
+    val motion = remember { GhostMotion() }
 
-    LaunchedEffect(spec.spinDegPerSec, spec.pulseHz) {
-        if (spec.spinDegPerSec == 0f && spec.pulseHz == 0f) return@LaunchedEffect
+    LaunchedEffect(spec) {
+        if (spec.periodSec == 0f && spec.idleDegPerSec == 0f) {
+            // Мёртвые статусы: призрак замирает как есть, кадры не жжём.
+            envelope = 0f
+            return@LaunchedEffect
+        }
         var last = withFrameNanos { it }
         while (true) {
             withFrameNanos { now ->
-                val dt = (now - last) / 1_000_000_000f
+                val dt = ((now - last) / 1_000_000_000f).coerceAtMost(0.1f)
                 last = now
-                rotation = (rotation + spec.spinDegPerSec * dt) % 360f
-                pulsePhase = (pulsePhase + spec.pulseHz * dt) % 1f
+                motion.advance(spec, dt)
+                rotation = motion.rotation
+                envelope = motion.envelope
             }
         }
     }
 
     Canvas(modifier) {
-        val s = size.minDimension / VIEWBOX
-        // 0..1: и дыхание ядра, и «выдох» сегментов сидят на одной фазе, чтобы двигаться в такт.
-        val wave = (sin(pulsePhase * 2f * PI.toFloat()) + 1f) / 2f
-        val spread = spec.spreadUnits * wave
-
-        withTransform({
-            translate((size.width - VIEWBOX * s) / 2f, (size.height - VIEWBOX * s) / 2f)
-            scale(s, s, Offset.Zero)
-        }) {
-            rotate(rotation, pivot = Offset(CENTRE, CENTRE)) {
-                for ((path, direction) in shellSegments) {
-                    translate(direction.x * spread, direction.y * spread) {
-                        drawPath(path, spec.shell)
-                    }
-                }
-            }
-
-            if (spec.coreHollow) {
-                // Погасшее ядро: пустое кольцо — призрак «выключен».
-                drawCircle(
-                    color = spec.core,
-                    radius = CORE_RADIUS,
-                    center = Offset(CENTRE, CENTRE),
-                    style = Stroke(width = HOLLOW_STROKE),
-                )
-            } else {
-                val radius = CORE_RADIUS + CORE_PULSE * spec.corePulse * (wave * 2f - 1f)
-                drawCircle(color = spec.core, radius = radius, center = Offset(CENTRE, CENTRE))
-            }
-        }
+        drawGhost(spec, rotation, envelope)
     }
 }
 
-/** Поведение призрака в одном статусе: цвета, скорость оболочки и амплитуды дыхания. */
+/**
+ * Обратный отсчёт до сворачивания HUD: призрак дежурит, а вокруг него по часовой тает дуга.
+ * Кольцо — честный таймер (точно видно, сколько осталось), призрак — знак, что оверлей жив.
+ * [fraction] — сколько времени осталось, от 1 (полное кольцо) до 0.
+ */
+@Composable
+fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
+    Box(modifier) {
+        Canvas(Modifier.matchParentSize()) {
+            val s = size.minDimension / VIEWBOX
+            withTransform({
+                translate((size.width - VIEWBOX * s) / 2f, (size.height - VIEWBOX * s) / 2f)
+                scale(s, s, Offset.Zero)
+            }) {
+                val stroke = Stroke(width = RING_STROKE, cap = StrokeCap.Round)
+                val box = Size(RING_RADIUS * 2f, RING_RADIUS * 2f)
+                val topLeft = Offset(CENTRE - RING_RADIUS, CENTRE - RING_RADIUS)
+                drawArc(OverlayColors.TextDim.copy(alpha = 0.25f), 0f, 360f, false, topLeft, box, style = stroke)
+                drawArc(
+                    color = OverlayColors.Accent,
+                    startAngle = -90f,
+                    sweepAngle = 360f * fraction.coerceIn(0f, 1f),
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = box,
+                    style = stroke,
+                )
+            }
+        }
+        GhostIcon(OverlayStatus.Ready, Modifier.matchParentSize())
+    }
+}
+
+/** Направление рывков оболочки. */
+private enum class SpinDirection {
+    Clockwise, CounterClockwise,
+
+    /** Каждый цикл — в противоположную сторону: призрак «вертит головой». */
+    Alternate,
+
+    /** Случайная сторона на каждый цикл: хаос, «сканирую». */
+    Random,
+}
+
+/** Поведение призрака в одном статусе. */
 private data class GhostSpec(
     val shell: Color,
     val core: Color,
-    /** Скорость вращения оболочки, градусов в секунду. 0 — призрак замер. */
-    val spinDegPerSec: Float,
-    /** Частота дыхания (ядро и разлёт сегментов), герц. */
-    val pulseHz: Float,
-    /** Амплитуда пульса ядра, 0..1 от [CORE_PULSE]. */
-    val corePulse: Float,
-    /** Насколько сегменты отходят от ядра на «выдохе», в единицах вьюбокса. */
+    /** Период цикла «раскрылся → крутанулся → собрался», сек. 0 — призрак замер. */
+    val periodSec: Float,
+    /** Насколько сегменты отходят от ядра на пике раскрытия, в единицах вьюбокса. */
     val spreadUnits: Float,
+    /** Угол рывка за цикл. Кратный 90° бесшовен: у оболочки четырёхлучевая симметрия. */
+    val burstDeg: Float,
+    /** Фоновое вращение между рывками, градусов в секунду. */
+    val idleDegPerSec: Float,
+    val direction: SpinDirection = SpinDirection.Clockwise,
+    /** Сила свечения на раскрытии, 0..1. */
+    val glow: Float = 0f,
+    /** Каждый N-й цикл — вспышка: шире и ярче. 0 — без вспышек. */
+    val flareEveryN: Int = 0,
+    val flareBoost: Float = 1.6f,
+    /** Амплитуда дыхания ядра, 0..1 от [CORE_PULSE]. Ядро — про голос, оболочка — про работу. */
+    val corePulse: Float = 0f,
     /** Ядро кольцом вместо заливки — статусы, где линия мертва. */
     val coreHollow: Boolean = false,
 )
 
+/**
+ * Логика соответствия «действие → поведение»: энергия движения = объём работы, оболочка — про
+ * процесс, ядро — про голос, редкая вспышка — «я живой», полный замер — «я умер».
+ */
 private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
-    // Дежурит: едва заметно вращается и дышит, не отвлекая от игры.
+    // Дежурит: редкие неглубокие циклы, еле заметный доворот — жив, но ничего не происходит.
     OverlayStatus.Ready -> GhostSpec(
         shell = OverlayColors.TextDim, core = OverlayColors.TextDim,
-        spinDegPerSec = 24f, pulseHz = 0.25f, corePulse = 0.3f, spreadUnits = 10f,
+        periodSec = 2.6f, spreadUnits = 26f, burstDeg = 45f, idleDegPerSec = 6f,
+        glow = 0.1f, corePulse = 0.2f,
     )
 
-    // Слушает: оживился, ядро дышит в полную силу.
+    // Слушает: проснулся, дышит раз в секунду, «вертит головой»; вспышка — «всё ещё слушаю».
     OverlayStatus.Listening -> GhostSpec(
         shell = OverlayColors.Ok, core = OverlayColors.Ok,
-        spinDegPerSec = 70f, pulseHz = 1.1f, corePulse = 1f, spreadUnits = 26f,
+        periodSec = 1.1f, spreadUnits = 56f, burstDeg = 90f, idleDegPerSec = 12f,
+        direction = SpinDirection.Alternate, glow = 0.4f, flareEveryN = 4, flareBoost = 1.7f,
+        corePulse = 0.6f,
     )
 
-    // Думает: оболочка крутится быстро — призрак «сканирует».
+    // Думает: самый быстрый и хаотичный режим — полуобороты в непредсказуемую сторону.
     OverlayStatus.Thinking -> GhostSpec(
         shell = OverlayColors.Accent, core = OverlayColors.Accent,
-        spinDegPerSec = 300f, pulseHz = 1.6f, corePulse = 0.4f, spreadUnits = 32f,
+        periodSec = 0.7f, spreadUnits = 62f, burstDeg = 180f, idleDegPerSec = 24f,
+        direction = SpinDirection.Random, glow = 0.5f, corePulse = 0.3f,
     )
 
+    // Стучится: ровные методичные обороты в одну сторону — попытка за попыткой.
     OverlayStatus.Connecting, is OverlayStatus.Reconnecting -> GhostSpec(
         shell = OverlayColors.Warn, core = OverlayColors.Warn,
-        spinDegPerSec = 180f, pulseHz = 1.2f, corePulse = 0.3f, spreadUnits = 20f,
+        periodSec = 1.5f, spreadUnits = 40f, burstDeg = 90f, idleDegPerSec = 14f,
+        glow = 0.25f, corePulse = 0.25f,
     )
 
-    // Отвечает/говорит: вращение спокойное, зато ядро частит — «речь».
+    // Говорит: оболочка собрана и спокойна, акцент на ядре — оно частит, как индикатор голоса.
     OverlayStatus.Answering, OverlayStatus.Speaking -> GhostSpec(
         shell = OverlayColors.Accent, core = OverlayColors.Accent,
-        spinDegPerSec = 90f, pulseHz = 2.4f, corePulse = 1f, spreadUnits = 14f,
+        periodSec = 0.9f, spreadUnits = 30f, burstDeg = 45f, idleDegPerSec = 10f,
+        direction = SpinDirection.Alternate, glow = 0.55f, corePulse = 0.9f,
     )
 
-    // Линия мертва: призрак замирает, ядро гаснет до кольца.
+    // Линия мертва: единственные статусы без движения вообще, ядро гаснет до кольца.
     OverlayStatus.Disconnected -> GhostSpec(
         shell = OverlayColors.TextDim, core = OverlayColors.TextDim,
-        spinDegPerSec = 0f, pulseHz = 0f, corePulse = 0f, spreadUnits = 0f, coreHollow = true,
+        periodSec = 0f, spreadUnits = 0f, burstDeg = 0f, idleDegPerSec = 0f, coreHollow = true,
     )
 
     is OverlayStatus.Failed -> GhostSpec(
         shell = OverlayColors.Error, core = OverlayColors.Error,
-        spinDegPerSec = 0f, pulseHz = 0f, corePulse = 0f, spreadUnits = 0f, coreHollow = true,
+        periodSec = 0f, spreadUnits = 0f, burstDeg = 0f, idleDegPerSec = 0f, coreHollow = true,
     )
+}
+
+/** Накопленное состояние движения: живёт между кадрами и между сменами статуса. */
+private class GhostMotion {
+    var rotation = 0f
+        private set
+    var envelope = 0f
+        private set
+
+    private var clock = 0f
+    private var curCycle = 0L
+    private var prevSpinP = 0f
+    private var randDir = 1f
+
+    fun advance(spec: GhostSpec, dt: Float) {
+        if (spec.periodSec <= 0f) {
+            envelope = 0f
+            rotation = (rotation + spec.idleDegPerSec * dt).mod(360f)
+            prevSpinP = 0f
+            return
+        }
+        clock += dt
+        val cycles = (clock / spec.periodSec).toLong()
+        val t = clock / spec.periodSec - cycles
+        val env: Float
+        val spinP: Float
+        when {
+            t < OPEN_END -> {
+                env = easeOut(t / OPEN_END)
+                spinP = 0f
+            }
+            t < SPIN_END -> {
+                env = 1f
+                spinP = easeInOut((t - OPEN_END) / (SPIN_END - OPEN_END))
+            }
+            t < CLOSE_END -> {
+                env = 1f - easeInOut((t - SPIN_END) / (CLOSE_END - SPIN_END))
+                spinP = 1f
+            }
+            else -> {
+                env = 0f
+                spinP = 1f
+            }
+        }
+
+        val flare = if (spec.flareEveryN > 0 && cycles % spec.flareEveryN == spec.flareEveryN - 1L) {
+            spec.flareBoost
+        } else {
+            1f
+        }
+        envelope = env * flare
+
+        if (cycles != curCycle) {
+            // Хвост прошлого цикла докручивается его же направлением, и только потом смена.
+            rotation += spec.burstDeg * direction(spec, curCycle) * (1f - prevSpinP)
+            curCycle = cycles
+            prevSpinP = 0f
+            if (spec.direction == SpinDirection.Random) randDir = if (Random.nextBoolean()) 1f else -1f
+        }
+        val dir = direction(spec, cycles)
+        rotation = (rotation + spec.burstDeg * dir * (spinP - prevSpinP) + spec.idleDegPerSec * dir * dt).mod(360f)
+        prevSpinP = spinP
+    }
+
+    private fun direction(spec: GhostSpec, cycle: Long): Float = when (spec.direction) {
+        SpinDirection.Clockwise -> 1f
+        SpinDirection.CounterClockwise -> -1f
+        SpinDirection.Alternate -> if (cycle % 2 == 0L) 1f else -1f
+        SpinDirection.Random -> randDir
+    }
+}
+
+private fun easeOut(x: Float) = 1f - (1f - x).pow(3)
+
+private fun easeInOut(x: Float) =
+    if (x < 0.5f) 4f * x * x * x else 1f - ((-2f * x + 2f).pow(3)) / 2f
+
+private fun DrawScope.drawGhost(spec: GhostSpec, rotation: Float, envelope: Float) {
+    val s = size.minDimension / VIEWBOX
+    val spread = spec.spreadUnits * envelope
+    val glowVal = spec.glow * envelope
+    // Blur у Skia — в пикселях устройства, поэтому радиус приводится к размеру холста.
+    val glowSigma = glowVal * GLOW_SIGMA_UNITS * s
+
+    withTransform({
+        translate((size.width - VIEWBOX * s) / 2f, (size.height - VIEWBOX * s) / 2f)
+        scale(s, s, Offset.Zero)
+    }) {
+        rotate(rotation, pivot = Offset(CENTRE, CENTRE)) {
+            for ((path, direction) in shellSegments) {
+                translate(direction.x * spread, direction.y * spread) {
+                    if (glowVal > 0.03f) drawGlowPath(path, spec.shell, glowVal, glowSigma)
+                    drawPath(path, spec.shell)
+                }
+            }
+        }
+
+        if (spec.coreHollow) {
+            // Погасшее ядро: пустое кольцо — призрак «выключен».
+            drawCircle(
+                color = spec.core,
+                radius = CORE_RADIUS,
+                center = Offset(CENTRE, CENTRE),
+                style = Stroke(width = HOLLOW_STROKE),
+            )
+        } else {
+            val radius = CORE_RADIUS + CORE_PULSE * spec.corePulse * (envelope * 2f - 1f)
+            if (glowVal > 0.03f) drawGlowCircle(radius, spec.core, glowVal, glowSigma)
+            drawCircle(color = spec.core, radius = radius, center = Offset(CENTRE, CENTRE))
+        }
+    }
+}
+
+/** Размытая копия сегмента позади заливки — свечение цветом оболочки. */
+private fun DrawScope.drawGlowPath(path: Path, color: Color, glow: Float, sigma: Float) {
+    if (sigma <= 0f) return
+    val paint = glowPaint(color, glow, sigma)
+    drawIntoCanvas { it.drawPath(path, paint) }
+}
+
+private fun DrawScope.drawGlowCircle(radius: Float, color: Color, glow: Float, sigma: Float) {
+    if (sigma <= 0f) return
+    val paint = glowPaint(color, glow, sigma)
+    drawIntoCanvas { it.drawCircle(Offset(CENTRE, CENTRE), radius, paint) }
+}
+
+private fun glowPaint(color: Color, glow: Float, sigma: Float): Paint {
+    val paint = Paint()
+    paint.color = color.copy(alpha = min(1f, glow * 1.1f))
+    paint.asFrameworkPaint().maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, sigma)
+    return paint
 }
 
 /** Контуры сегментов — как в icon_to_animate.svg, вьюбокс 965×965. */
 private const val VIEWBOX = 965f
 private const val CENTRE = VIEWBOX / 2f
 
-/** Радиус ядра и размах его пульса: внутренний край сегментов ~230, зазор остаётся всегда. */
-private const val CORE_RADIUS = 150f
-private const val CORE_PULSE = 34f
+/** Ядро поменьше: пока внутри ничего не показываем, крупный круг только спорит с оболочкой. */
+private const val CORE_RADIUS = 105f
+private const val CORE_PULSE = 24f
 private const val HOLLOW_STROKE = 38f
+
+/** Доли периода на фазы цикла: раскрытие держится всю «крутку» и складывается после. */
+private const val OPEN_END = 0.22f
+private const val SPIN_END = 0.58f
+private const val CLOSE_END = 0.82f
+
+/** Радиус размытия свечения на полной силе, в единицах вьюбокса. */
+private const val GLOW_SIGMA_UNITS = 42f
+
+/** Кольцо обратного отсчёта вокруг призрака. */
+private const val RING_RADIUS = 452f
+private const val RING_STROKE = 22f
 
 /**
  * Пути сегментов из SVG и направление «выдоха» каждого — от центра наружу.
