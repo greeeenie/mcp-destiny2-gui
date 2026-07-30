@@ -351,12 +351,14 @@ private fun DrawScope.drawGhost(
         translate((size.width - VIEW_W * s) / 2f, (size.height - VIEW_H * s) / 2f)
         scale(s, s, Offset.Zero)
     }) {
-        rotate(rotation, pivot = Offset(CX, CY)) {
-            shellSegments.forEachIndexed { index, (path, direction) ->
-                val color = chevronColors?.get(index / 2) ?: spec.shell
-                translate(direction.x * spread, direction.y * spread) {
-                    if (shellGlow > 0.03f) drawGlowPath(path, color, shellGlow, shellSigma)
-                    drawPath(path, color)
+        // Два контр-вращающихся кольца, как шестерёнки: вертикальные шевроны крутятся
+        // против горизонтальных — знак у каждого сегмента свой.
+        shellSegments.forEachIndexed { index, segment ->
+            val color = chevronColors?.get(index / 2) ?: spec.shell
+            rotate(rotation * segment.spin, pivot = Offset(CX, CY)) {
+                translate(segment.dir.x * spread, segment.dir.y * spread) {
+                    if (shellGlow > 0.03f) drawGlowPath(segment.path, color, shellGlow, shellSigma)
+                    drawPath(segment.path, color)
                 }
             }
         }
@@ -458,21 +460,26 @@ private const val EQ_WAVE_DEPTH = 0.7f
 /** Дыхание глаза: размах масштаба на полном пульсе. */
 private const val EYE_PULSE = 0.3f
 
+/** Сегмент оболочки: контур, направление «выдоха» от центра и знак вращения своего кольца. */
+private class ShellSegment(val path: Path, val dir: Offset, val spin: Float)
+
 /**
  * Сегменты оболочки: четыре шеврона по два куска, порядок — верх, право, низ, лево
- * (тем же порядком гаснут при отсчёте). Направление — «выдох» от центра.
+ * (тем же порядком гаснут при отсчёте). Вертикальные шевроны крутятся против горизонтальных.
  */
-private val shellSegments: List<Pair<Path, Offset>> by lazy {
+private val shellSegments: List<ShellSegment> by lazy {
+    fun seg(data: String, dir: Offset, spin: Float) =
+        ShellSegment(PathParser().parsePathString(data).toPath(), dir, spin)
     listOf(
-        "M141.5 75L114.5 98L69.5 54L117.5 0H147V75H141.5Z" to Offset(0f, -1f),
-        "M152.5 75L179.5 98L224.5 54L176.5 0H147V75H152.5Z" to Offset(0f, -1f),
-        "M293.5 117.5V129H204L182 101L227 56.5L293.5 117.5Z" to Offset(1f, 0f),
-        "M293.5 152V140.5H204L182 168.5L227 213L293.5 152Z" to Offset(1f, 0f),
-        "M141.5 193.5L114.5 170.5L69.5 214.5L117.5 268.5H147V193.5H141.5Z" to Offset(0f, 1f),
-        "M152.5 193.5L179.5 170.5L224.5 214.5L176.5 268.5H147V193.5H152.5Z" to Offset(0f, 1f),
-        "M0 151.5V140H89.5L111.5 168L66.5 212.5L0 151.5Z" to Offset(-1f, 0f),
-        "M0 117.5V129H89.5L111.5 101L66.5 56.5L0 117.5Z" to Offset(-1f, 0f),
-    ).map { (data, direction) -> PathParser().parsePathString(data).toPath() to direction }
+        seg("M141.5 75L114.5 98L69.5 54L117.5 0H147V75H141.5Z", Offset(0f, -1f), -1f),
+        seg("M152.5 75L179.5 98L224.5 54L176.5 0H147V75H152.5Z", Offset(0f, -1f), -1f),
+        seg("M293.5 117.5V129H204L182 101L227 56.5L293.5 117.5Z", Offset(1f, 0f), 1f),
+        seg("M293.5 152V140.5H204L182 168.5L227 213L293.5 152Z", Offset(1f, 0f), 1f),
+        seg("M141.5 193.5L114.5 170.5L69.5 214.5L117.5 268.5H147V193.5H141.5Z", Offset(0f, 1f), -1f),
+        seg("M152.5 193.5L179.5 170.5L224.5 214.5L176.5 268.5H147V193.5H152.5Z", Offset(0f, 1f), -1f),
+        seg("M0 151.5V140H89.5L111.5 168L66.5 212.5L0 151.5Z", Offset(-1f, 0f), 1f),
+        seg("M0 117.5V129H89.5L111.5 101L66.5 56.5L0 117.5Z", Offset(-1f, 0f), 1f),
+    )
 }
 
 /** Глаз-стрелки из ghost_icon_afk.svg. */
