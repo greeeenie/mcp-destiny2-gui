@@ -86,11 +86,12 @@ fun GhostIcon(status: OverlayStatus, micLevel: Float = 0f, modifier: Modifier = 
 }
 
 /**
- * Обратный отсчёт до сворачивания HUD. Идёт сразу после «печатает», поэтому стартует в его
- * акцентном цвете и гасит крылья по очереди — верхнее, правое, нижнее, левое: каждое
- * погасшее — минус четверть времени, внутри своей четверти крыло плавно остывает. Ядро
- * гаснет с последним крылом; сам призрак статичен, так что к нулю он приходит ровно
- * к виду «Готов». [fraction] — сколько времени осталось, от 1 до 0.
+ * Обратный отсчёт до сворачивания HUD: ответ готов — все крылья вспыхивают акцентным
+ * цветом, а дальше гаснут по очереди (верхнее, правое, нижнее, левое). Каждое крыло
+ * в свою четверть времени мигает «синее/серое» и к концу четверти гаснет насовсем:
+ * мигание заметно боковым зрением лучше плавного остывания. Ядро остывает с последней
+ * четвертью; сам призрак статичен, так что к нулю он приходит ровно к виду «Готов».
+ * [fraction] — сколько времени осталось, от 1 до 0.
  */
 @Composable
 fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
@@ -108,8 +109,19 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val f = fraction.coerceIn(0f, 1f)
         val wingColors = List(WING_COUNT) { i ->
-            val warmth = (f * WING_COUNT - (WING_COUNT - 1 - i)).coerceIn(0f, 1f)
-            lerp(OverlayColors.TextDim, OverlayColors.Accent, warmth)
+            // Четверть крыла: > 1 — очередь не дошла, 0..1 — мигает, <= 0 — погасло.
+            val q = f * WING_COUNT - (WING_COUNT - 1 - i)
+            when {
+                q >= 1f -> OverlayColors.Accent
+                q <= 0f -> OverlayColors.TextDim
+                // Чётные отрезки — синий, нечётные — серый; последний отрезок нечётный,
+                // поэтому крыло всегда догорает в сером и гаснет без скачка.
+                else -> if (((1f - q) * BLINK_SEGMENTS).toInt() % 2 == 0) {
+                    OverlayColors.Accent
+                } else {
+                    OverlayColors.TextDim
+                }
+            }
         }
         drawGhost(
             COUNTDOWN_SPEC, prof, clock = 0f, level = 0f,
@@ -118,6 +130,9 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
         )
     }
 }
+
+/** Отрезков мигания на четверть отсчёта: три вспышки «синее/серое» на крыло. */
+private const val BLINK_SEGMENTS = 6
 
 /** Отсчёт статичен и сер, как «Готов»: время показывают остывающие крылья. */
 private val COUNTDOWN_SPEC = GhostSpec(
@@ -162,8 +177,9 @@ private data class GhostSpec(
 )
 
 /**
- * Логика соответствия «действие → поведение»: крылья рассказывают про процесс (темп
- * пружины = объём работы), ядро — про суть происходящего, полный замер — «я умер».
+ * Логика соответствия «действие → поведение»: крылья рассказывают про процесс только
+ * движением (темп пружины = объём работы) и всегда серые — весь цвет несёт ядро,
+ * поэтому статус читается по одной точке. Полный замер — «я умер».
  */
 private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
     // Дежурит: полностью статичен в авторской позе — жив, но не отвлекает.
@@ -173,25 +189,25 @@ private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
 
     // Слушает: неспешные пружинные обороты, ядро дышит настоящим голосом.
     OverlayStatus.Listening -> GhostSpec(
-        shell = OverlayColors.Ok, core = OverlayColors.Ok,
+        shell = OverlayColors.TextDim, core = OverlayColors.Ok,
         periodSec = 1.1f, glow = 0.55f, center = CenterStyle.Voice,
     )
 
     // Думает: бодрые обороты, скобки-радар кружат — «высматривает».
     OverlayStatus.Thinking -> GhostSpec(
-        shell = OverlayColors.Accent, core = OverlayColors.Accent,
+        shell = OverlayColors.TextDim, core = OverlayColors.Accent,
         periodSec = 0.8f, glow = 0.65f, center = CenterStyle.Radar,
     )
 
     // Стучится: медленные обороты, круг подмигивает.
     OverlayStatus.Connecting, is OverlayStatus.Reconnecting -> GhostSpec(
-        shell = OverlayColors.Warn, core = OverlayColors.Warn,
+        shell = OverlayColors.TextDim, core = OverlayColors.Warn,
         periodSec = 1.5f, glow = 0.25f, center = CenterStyle.Blink,
     )
 
     // Говорит: ровный ход, круг бьётся сердцем и расталкивает скобки.
     OverlayStatus.Answering, OverlayStatus.Speaking -> GhostSpec(
-        shell = OverlayColors.Accent, core = OverlayColors.Accent,
+        shell = OverlayColors.TextDim, core = OverlayColors.Accent,
         periodSec = 0.9f, glow = 0.65f, pulse = 0.9f, center = CenterStyle.Beat,
     )
 
@@ -203,7 +219,7 @@ private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
 
     // Ошибка: вместо круга «!» в красных скобках — отличается от обрыва не только цветом.
     is OverlayStatus.Failed -> GhostSpec(
-        shell = OverlayColors.Error, core = OverlayColors.Error,
+        shell = OverlayColors.TextDim, core = OverlayColors.Error,
         periodSec = 0f, center = CenterStyle.Bang,
     )
 }
