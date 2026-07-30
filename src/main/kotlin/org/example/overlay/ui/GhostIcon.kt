@@ -16,7 +16,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -89,10 +89,11 @@ fun GhostIcon(status: OverlayStatus, micLevel: Float = 0f, modifier: Modifier = 
 }
 
 /**
- * Обратный отсчёт до сворачивания HUD — «ядро-таймер»: призрак сразу становится серым
- * (цвет остаётся только у дуги), вокруг ядра по часовой тает акцентная дуга, а само ядро
- * сжимается к точке. Призрак статичен в собранной позе, так что к нулю он приходит ровно
- * к виду «Готов». [fraction] — сколько времени осталось, от 1 до 0.
+ * Обратный отсчёт до сворачивания HUD. Идёт сразу после «печатает», поэтому стартует в его
+ * акцентном цвете и гасит крылья по очереди — верхнее, правое, нижнее, левое: каждое
+ * погасшее — минус четверть времени, внутри своей четверти крыло плавно остывает. Ядро
+ * гаснет с последним крылом и стягивается к размеру покоя; сам призрак статичен, так что
+ * к нулю он приходит ровно к виду «Готов». [fraction] — сколько времени осталось, от 1 до 0.
  */
 @Composable
 fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
@@ -109,24 +110,17 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
 
     Canvas(modifier) {
         val f = fraction.coerceIn(0f, 1f)
+        val wingColors = List(WING_COUNT) { i ->
+            val warmth = (f * WING_COUNT - (WING_COUNT - 1 - i)).coerceIn(0f, 1f)
+            lerp(OverlayColors.TextDim, OverlayColors.Accent, warmth)
+        }
         drawGhost(
             COUNTDOWN_SPEC, rotation,
             envelope = 0f, coreEnvelope = 0f, time = 0f, level = 0f,
-            coreRadiusOverride = TIMER_CORE_MIN + (CORE_RADIUS - TIMER_CORE_MIN) * f,
+            wingColors = wingColors,
+            coreColor = lerp(OverlayColors.TextDim, OverlayColors.Accent, (f * WING_COUNT).coerceIn(0f, 1f)),
+            coreRadiusOverride = CORE_REST + (CORE_RADIUS - CORE_REST) * f,
         )
-
-        // Дуга-таймер вокруг ядра — единственное цветное, что остаётся у призрака.
-        val s = size.minDimension / VIEWBOX
-        withTransform({
-            translate((size.width - VIEWBOX * s) / 2f, (size.height - VIEWBOX * s) / 2f)
-            scale(s, s, Offset.Zero)
-        }) {
-            val stroke = Stroke(width = TIMER_STROKE, cap = StrokeCap.Round)
-            val box = Size(TIMER_RADIUS * 2f, TIMER_RADIUS * 2f)
-            val topLeft = Offset(CENTRE - TIMER_RADIUS, CENTRE - TIMER_RADIUS)
-            drawArc(OverlayColors.TextDim.copy(alpha = 0.25f), 0f, 360f, false, topLeft, box, style = stroke)
-            drawArc(OverlayColors.Accent, -90f, 360f * f, false, topLeft, box, style = stroke)
-        }
     }
 }
 
@@ -184,6 +178,8 @@ private data class GhostSpec(
     val flareEveryN: Int = 0,
     val flareBoost: Float = 1.6f,
     val coreStyle: CoreStyle = CoreStyle.Steady,
+    /** Базовый радиус ядра: в покое оно меньше, чем в активных статусах. */
+    val coreRadiusUnits: Float = CORE_RADIUS,
     /** Амплитуда сердцебиения ядра, 0..1 от [CORE_PULSE] (для [CoreStyle.Beat]). */
     val corePulse: Float = 0f,
     /** Период сердцебиения «два удара → кулдаун», сек (для [CoreStyle.Beat]). */
@@ -199,10 +195,11 @@ private data class GhostSpec(
  * процесс, ядро — про происходящее, полный замер — «я умер».
  */
 private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
-    // Дежурит: полностью статичен в собранной позе — жив, но ничего не происходит.
+    // Дежурит: полностью статичен в собранной позе, ядро поменьше — жив, но не отвлекает.
     OverlayStatus.Ready -> GhostSpec(
         shell = OverlayColors.TextDim, core = OverlayColors.TextDim,
         periodSec = 0f, spreadUnits = 0f, burstDeg = 0f, idleDegPerSec = 0f,
+        coreRadiusUnits = CORE_REST,
     )
 
     // Слушает: неглубоко дышит, «вертит головой», ядро пульсирует от настоящего голоса.
@@ -393,6 +390,9 @@ private fun DrawScope.drawGhost(
     coreEnvelope: Float,
     time: Float,
     level: Float,
+    /** Цвета крыльев по одному, если они разошлись (отсчёт); null — все цветом [GhostSpec.shell]. */
+    wingColors: List<Color>? = null,
+    coreColor: Color = spec.core,
     coreRadiusOverride: Float? = null,
 ) {
     val s = size.minDimension / VIEWBOX
@@ -414,10 +414,11 @@ private fun DrawScope.drawGhost(
     }) {
         // Вся оболочка крутится как одно целое — крылья никогда не идут врозь.
         rotate(rotation, pivot = Offset(CENTRE, CENTRE)) {
-            for (segment in shellSegments) {
+            shellSegments.forEachIndexed { index, segment ->
+                val color = wingColors?.get(index) ?: spec.shell
                 translate(segment.dir.x * spread, segment.dir.y * spread) {
-                    if (shellGlow > 0.03f) drawGlowPath(segment.path, spec.shell, shellGlow, shellSigma)
-                    drawPath(segment.path, spec.shell)
+                    if (shellGlow > 0.03f) drawGlowPath(segment.path, color, shellGlow, shellSigma)
+                    drawPath(segment.path, color)
                 }
             }
         }
@@ -425,25 +426,25 @@ private fun DrawScope.drawGhost(
         if (spec.coreHollow) {
             // Погасшее ядро: пустое кольцо — призрак «выключен».
             drawCircle(
-                color = spec.core,
+                color = coreColor,
                 radius = CORE_RADIUS,
                 center = Offset(CENTRE, CENTRE),
                 style = Stroke(width = HOLLOW_STROKE),
             )
             if (spec.coreBang) {
                 drawRoundRect(
-                    color = spec.core,
+                    color = coreColor,
                     topLeft = Offset(BANG_X, BANG_Y),
                     size = Size(BANG_W, BANG_H),
                     cornerRadius = CornerRadius(BANG_W / 2f, BANG_W / 2f),
                 )
-                drawCircle(spec.core, radius = BANG_DOT_R, center = Offset(CENTRE, BANG_DOT_Y))
+                drawCircle(coreColor, radius = BANG_DOT_R, center = Offset(CENTRE, BANG_DOT_Y))
             }
             return@withTransform
         }
 
         var centre = Offset(CENTRE, CENTRE)
-        var radius = coreRadiusOverride ?: CORE_RADIUS
+        var radius = coreRadiusOverride ?: spec.coreRadiusUnits
         var alpha = 1f
         when (spec.coreStyle) {
             CoreStyle.Steady -> Unit
@@ -464,7 +465,7 @@ private fun DrawScope.drawGhost(
                 repeat(2) { k ->
                     val p = (time / spec.coreBeatPeriodSec + k * 0.5f).mod(1f)
                     drawCircle(
-                        color = spec.core.copy(alpha = (1f - p) * 0.45f),
+                        color = coreColor.copy(alpha = (1f - p) * 0.45f),
                         radius = radius + 40f + p * 260f,
                         center = Offset(CENTRE, CENTRE),
                         style = Stroke(width = RIPPLE_STROKE),
@@ -480,8 +481,8 @@ private fun DrawScope.drawGhost(
             }
         }
 
-        if (coreGlow > 0.03f) drawGlowCircle(centre, radius, spec.core, coreGlow, coreSigma)
-        drawCircle(color = spec.core.copy(alpha = spec.core.alpha * alpha), radius = radius, center = centre)
+        if (coreGlow > 0.03f) drawGlowCircle(centre, radius, coreColor, coreGlow, coreSigma)
+        drawCircle(color = coreColor.copy(alpha = coreColor.alpha * alpha), radius = radius, center = centre)
     }
 }
 
@@ -528,10 +529,10 @@ private const val BANG_H = 120f
 private const val BANG_DOT_Y = 558f
 private const val BANG_DOT_R = 20f
 
-/** Дуга-таймер отсчёта вокруг ядра и минимальный радиус сжатого ядра. */
-private const val TIMER_RADIUS = CORE_RADIUS + 72f
-private const val TIMER_STROKE = 18f
-private const val TIMER_CORE_MIN = 52f
+/** Радиус ядра в покое: меньше рабочего, чтобы не отвлекать. */
+private const val CORE_REST = 100f
+
+private const val WING_COUNT = 4
 
 /** Доли периода на фазы цикла: раскрытие держится всю «крутку» и складывается после. */
 private const val OPEN_END = 0.22f
