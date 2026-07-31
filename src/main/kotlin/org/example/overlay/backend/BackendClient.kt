@@ -66,12 +66,9 @@ class BackendClient(
     suspend fun profile(token: String): Profile =
         rawGet("/profile", token).requireSuccess().parse(Profile::class.java)
 
-    /**
-     * Отвязать Bungie-аккаунт от MCP-профиля. Ручки на сервере пока нет — до её появления
-     * вызов честно вернёт ошибку бэкенда; путь согласован на будущее.
-     */
+    /** Отвязать Bungie-аккаунт от MCP-профиля. */
     suspend fun unlinkBungie(token: String) {
-        send(request("/profile/bungie", token, DEFAULT_TIMEOUT).DELETE().build()).requireSuccess()
+        send(request("/mcp-profile/bungie-profile", token, DEFAULT_TIMEOUT).DELETE().build()).requireSuccess()
     }
 
     /**

@@ -388,10 +388,7 @@ class AppState(
         }
     }
 
-    /**
-     * Кнопка «Отвязать аккаунт». Серверная ручка ещё не поднята: до неё клик покажет
-     * ошибку бэкенда, а когда появится — заработает без правок здесь.
-     */
+    /** Ссылка «отвязать» у статуса Bungie: после отвязки профиль перечитывается. */
     fun unlinkBungie() = launchAccount {
         backend.unlinkBungie(requireToken())
         loadAccountData(requireToken())
