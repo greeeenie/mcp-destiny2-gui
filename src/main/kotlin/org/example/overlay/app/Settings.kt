@@ -13,7 +13,7 @@ data class Settings(
     val pttKeyCode: Int = DEFAULT_PTT_KEY_CODE,
     /** Модель ответа из GET /voice/models. `null` — серверная по умолчанию. */
     val chatModel: String? = null,
-    /** Модель распознавания речи оттуда же. `null` — серверная по умолчанию. */
+    /** Модель распознавания речи оттуда же. `null` — клиентский дефолт [DEFAULT_STT_MODEL]. */
     val sttModel: String? = null,
     /** Язык распознавания: `ru` или `en`. `null` — авто: сервер не передаёт язык в Inworld. */
     val sttLanguage: String? = null,
@@ -22,6 +22,12 @@ data class Settings(
     companion object {
         const val DEFAULT_BASE_URL = "https://duoxik.space/mcp-destiny2-client"
         const val DEFAULT_PTT_KEY_CODE = 0xA5
+
+        /**
+         * Распознавание по умолчанию — Fish Audio, а не серверный Whisper: дефолт задан
+         * на клиенте, чтобы не ждать выкатки сервера. `sttModel = null` означает именно его.
+         */
+        const val DEFAULT_STT_MODEL = "fish-audio/asr"
     }
 }
 

@@ -130,7 +130,7 @@ class VoiceRuntime(
                 val text = backend.transcribe(
                     token,
                     WavEncoder.encode(pcm, SAMPLE_RATE),
-                    settings.current.sttModel,
+                    settings.current.sttModel ?: Settings.DEFAULT_STT_MODEL,
                     settings.current.sttLanguage,
                 )
                 if (text.isBlank()) {

@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
+import org.example.overlay.app.Settings
 import org.example.overlay.backend.VoiceModelOption
 import org.example.overlay.backend.VoiceModels
 import org.example.overlay.input.VirtualKeys
@@ -79,7 +80,9 @@ fun VoiceScreen(state: AppState) {
                 ModelSelector(
                     title = "Модель распознавания",
                     options = available.sttOptions,
-                    default = available.sttDefault,
+                    // Дефолт клиентский, не серверный: расшифровкой по умолчанию занимается
+                    // Fish Audio (см. Settings.DEFAULT_STT_MODEL).
+                    default = Settings.DEFAULT_STT_MODEL,
                     current = settings.sttModel,
                     onSelect = { choice -> state.updateSettings { it.copy(sttModel = choice) } },
                 )
