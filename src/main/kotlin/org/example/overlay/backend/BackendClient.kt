@@ -63,12 +63,19 @@ class BackendClient(
             .requireSuccess()
             .parse(LoginResponse::class.java)
 
-    suspend fun profile(token: String): Profile =
-        rawGet("/profile", token).requireSuccess().parse(Profile::class.java)
+    /** Статус привязки Bungie: 200 — привязан (в теле данные аккаунта), 404 — ещё нет. */
+    suspend fun profile(token: String): Profile {
+        val response = rawGet("/bungie-profile", token)
+        if (response.statusCode() == 404) return Profile(bungieLinked = false)
+        return Profile(
+            bungieLinked = true,
+            bungieProfile = response.requireSuccess().parse(BungieProfile::class.java),
+        )
+    }
 
     /** Отвязать Bungie-аккаунт: прокси-ручка бэкенда, дальше он сам идёт в mcp-destiny2. */
     suspend fun unlinkBungie(token: String) {
-        send(request("/profile/bungie-profile", token, DEFAULT_TIMEOUT).DELETE().build()).requireSuccess()
+        send(request("/bungie-profile", token, DEFAULT_TIMEOUT).DELETE().build()).requireSuccess()
     }
 
     /**

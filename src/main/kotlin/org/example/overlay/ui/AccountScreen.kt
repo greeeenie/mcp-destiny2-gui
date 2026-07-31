@@ -123,7 +123,7 @@ private fun ProfileCard(state: AppState) {
     val current = session ?: return
 
     Column {
-        InfoRow("Пользователь", profile?.name ?: current.username)
+        InfoRow("Пользователь", current.username)
 
         val linked = profile?.bungieLinked
         InfoRow(

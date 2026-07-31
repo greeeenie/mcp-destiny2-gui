@@ -11,8 +11,11 @@ data class LoginResponse(
     val expiresAt: String,
 )
 
+/**
+ * Статус привязки Bungie. По проводу ходит только [bungieProfile] (`GET /bungie-profile`);
+ * обёртку собирает [BackendClient]: 200 — привязан, 404 — нет.
+ */
 data class Profile(
-    val name: String,
     val bungieLinked: Boolean,
     val bungieProfile: BungieProfile? = null,
 )
@@ -23,6 +26,8 @@ data class BungieProfile(
     val primaryMembershipType: Int? = null,
     val uniqueName: String? = null,
     val displayName: String? = null,
+    /** Когда инвентарь последний раз синхронизирован; ISO-8601, null до первой синхронизации. */
+    val inventorySyncedAt: String? = null,
 )
 
 /** Ответ `GET /voice/models`: из чего игрок выбирает модели на вкладке «Голос». */
