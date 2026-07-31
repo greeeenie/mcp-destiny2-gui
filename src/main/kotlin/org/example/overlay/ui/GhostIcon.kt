@@ -91,6 +91,10 @@ fun GhostIcon(status: OverlayStatus, micLevel: Float = 0f, modifier: Modifier = 
  * в свою четверть времени мигает «синее/серое» и к концу четверти гаснет насовсем:
  * мигание заметно боковым зрением лучше плавного остывания. Ядро остывает с последней
  * четвертью; сам призрак статичен, так что к нулю он приходит ровно к виду «Готов».
+ *
+ * Наведение курсора возвращает отсчёт на старт ([fraction] прыгает к 1) — уже погасшие
+ * крылья при этом не вспыхивают разом, а загораются обратно той же волной, с последнего
+ * погасшего к первому: гашение как бы отматывается назад.
  * [fraction] — сколько времени осталось, от 1 до 0.
  */
 @Composable
@@ -103,13 +107,34 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
     // ещё крутящихся крыльев нельзя — выглядит как два несогласованных слоя.
     var igniteStart by remember { mutableFloatStateOf(Float.NaN) }
 
+    // Стартовая волна зажигания — одноразовая и только вперёд. Она считается от ef,
+    // а наведение прыгает ef обратно к 1 — без защёлки все крылья гасли бы и волна
+    // начиналась заново с серого.
+    var ignitePeak by remember { mutableFloatStateOf(0f) }
+
+    // Фронт погасших крыльев, 0..4: крылья с индексом ниже фронта — серые. В обычном
+    // отсчёте прыгает вслед за четвертями (само гашение играет мигание), а когда
+    // наведение вернуло время — тает к нулю с постоянной скоростью, зажигая погасшие
+    // крылья по одному в обратном порядке.
+    var waveDark by remember { mutableFloatStateOf(0f) }
+
     LaunchedEffect(Unit) {
+        var last = 0L
         while (true) {
             withFrameNanos { now ->
                 sharedMotion.advance(COUNTDOWN_SPEC, now)
                 prof = sharedMotion.prof
                 if (igniteStart.isNaN() && sharedMotion.settled) {
                     igniteStart = fractionNow.coerceIn(0.01f, 1f)
+                }
+                val dt = if (last == 0L) 0f else ((now - last) / 1_000_000_000f).coerceAtMost(0.1f)
+                last = now
+                if (!igniteStart.isNaN()) {
+                    val ef = (fractionNow.coerceIn(0f, 1f) / igniteStart).coerceIn(0f, 1f)
+                    ignitePeak = maxOf(ignitePeak, ((1f - ef) / IGNITE_FRACTION).coerceIn(0f, 1f))
+                    val darkTarget = (WING_COUNT * (1f - ef)).toInt().coerceIn(0, WING_COUNT).toFloat()
+                    waveDark = if (waveDark <= darkTarget) darkTarget
+                    else maxOf(darkTarget, waveDark - dt / RELIGHT_SEC_PER_WING)
                 }
             }
         }
@@ -128,15 +153,13 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
             // Вся цветовая партитура укладывается в оставшееся с момента остановки
             // время: ef идёт от 1 к 0, как обычный fraction, только без хвоста мотора.
             val ef = (f / start).coerceIn(0f, 1f)
-            // Каскадное зажигание: крылья загораются волной по кругу (верх → право →
-            // низ → лево) за первую десятую отсчёта — вместо резкой общей вспышки.
-            // Волна и дальнейшее гашение идут в одном порядке.
-            val ignite = ((1f - ef) / IGNITE_FRACTION).coerceIn(0f, 1f)
             wingColors = List(WING_COUNT) { i ->
-                if (ignite < 1f) {
+                // Каскадное зажигание: крылья загораются волной по кругу (верх → право →
+                // низ → лево) за первую десятую отсчёта — вместо резкой общей вспышки.
+                val base = if (ignitePeak < 1f) {
                     lerp(
                         OverlayColors.TextDim, OverlayColors.Accent,
-                        (ignite * WING_COUNT - i).coerceIn(0f, 1f),
+                        (ignitePeak * WING_COUNT - i).coerceIn(0f, 1f),
                     )
                 } else {
                     // Четверть крыла: > 1 — очередь не дошла, 0..1 — мигает, <= 0 — погасло.
@@ -153,6 +176,10 @@ fun GhostCountdownIcon(fraction: Float, modifier: Modifier = Modifier) {
                         }
                     }
                 }
+                // Пока фронт тает после наведения, он держит уже погасшие крылья серыми
+                // и отпускает их по одному; в обычном отсчёте совпадает с четвертями
+                // и картинку не меняет.
+                lerp(base, OverlayColors.TextDim, (waveDark - i).coerceIn(0f, 1f))
             }
             coreColor = lerp(OverlayColors.TextDim, OverlayColors.Accent, (ef * WING_COUNT).coerceIn(0f, 1f))
         }
@@ -169,6 +196,9 @@ private const val BLINK_SEGMENTS = 6
 
 /** Доля отсчёта на волну зажигания крыльев — гасит резкий стык с «печатает». */
 private const val IGNITE_FRACTION = 0.1f
+
+/** Скорость обратного зажигания после наведения: столько секунд на одно крыло. */
+private const val RELIGHT_SEC_PER_WING = 0.15f
 
 /** Отсчёт статичен и сер, как «Готов»: время показывают остывающие крылья. */
 private val COUNTDOWN_SPEC = GhostSpec(
