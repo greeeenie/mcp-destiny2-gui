@@ -24,7 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -38,20 +38,22 @@ fun AccountScreen(state: AppState) {
     val busy by state.busy.collectAsState()
     val message by state.accountMessage.collectAsState()
 
-    Column(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
-        if (session == null) {
-            LoginForm(state, busy)
-        } else {
-            ProfileCard(state)
-        }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        ConsoleSection("Учётная запись") {
+            if (session == null) {
+                LoginForm(state, busy)
+            } else {
+                ProfileCard(state)
+            }
 
-        message?.let { text ->
-            Spacer(Modifier.height(12.dp))
-            Text(text, color = OverlayColors.Warn, fontSize = 13.sp)
-        }
-        if (busy) {
-            Spacer(Modifier.height(12.dp))
-            CircularProgressIndicator(modifier = Modifier.size(20.dp))
+            message?.let { text ->
+                Spacer(Modifier.height(12.dp))
+                Text(text, color = OverlayColors.Warn, fontSize = 13.sp)
+            }
+            if (busy) {
+                Spacer(Modifier.height(12.dp))
+                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+            }
         }
     }
 }
@@ -64,8 +66,6 @@ private fun LoginForm(state: AppState, busy: Boolean) {
     var rememberPassword by remember { mutableStateOf(settings.rememberPassword) }
 
     Column {
-        Text("Вход", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OverlayColors.Text)
-        Spacer(Modifier.height(4.dp))
         Text(
             "Имя пользователя становится именем MCP-профиля: 5–20 символов, латиница, цифры, _ и -.",
             color = OverlayColors.TextDim,
@@ -101,12 +101,14 @@ private fun LoginForm(state: AppState, busy: Boolean) {
             Button(
                 onClick = { state.login(username.trim(), password, rememberPassword) },
                 enabled = !busy && username.isNotBlank() && password.isNotBlank(),
+                shape = RectangleShape,
             ) {
                 Text("Войти")
             }
             OutlinedButton(
                 onClick = { state.register(username.trim(), password, rememberPassword) },
                 enabled = !busy && username.isNotBlank() && password.isNotBlank(),
+                shape = RectangleShape,
             ) {
                 Text("Зарегистрироваться")
             }
@@ -121,9 +123,6 @@ private fun ProfileCard(state: AppState) {
     val current = session ?: return
 
     Column {
-        Text("Профиль", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = OverlayColors.Text)
-        Spacer(Modifier.height(12.dp))
-
         InfoRow("Пользователь", profile?.name ?: current.username)
 
         val linked = profile?.bungieLinked
@@ -165,7 +164,7 @@ private fun ProfileCard(state: AppState) {
                 fontSize = 12.sp,
             )
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { state.linkBungie() }) { Text("Привязать Bungie") }
+            Button(onClick = { state.linkBungie() }, shape = RectangleShape) { Text("Привязать Bungie") }
         }
 
         val authUrl by state.authUrl.collectAsState()
@@ -176,12 +175,20 @@ private fun ProfileCard(state: AppState) {
             Text(authUrl.orEmpty(), color = OverlayColors.TextDim, fontSize = 11.sp)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { state.openAuthorizationLink() }) { Text("Открыть в браузере") }
+                OutlinedButton(onClick = { state.openAuthorizationLink() }, shape = RectangleShape) {
+                    Text("Открыть в браузере")
+                }
                 // Опрос профиля живёт 5 минут; дальше проверяем по кнопке.
-                OutlinedButton(onClick = { state.startProfilePolling() }, enabled = !polling) {
+                OutlinedButton(
+                    onClick = { state.startProfilePolling() },
+                    enabled = !polling,
+                    shape = RectangleShape,
+                ) {
                     Text(if (polling) "Проверяю…" else "Проверить ещё раз")
                 }
-                OutlinedButton(onClick = { state.dismissAuthorizationPrompt() }) { Text("Скрыть") }
+                OutlinedButton(onClick = { state.dismissAuthorizationPrompt() }, shape = RectangleShape) {
+                    Text("Скрыть")
+                }
             }
         }
         if (current.isExpiringSoon()) {
@@ -191,8 +198,8 @@ private fun ProfileCard(state: AppState) {
 
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { state.refreshAccount() }) { Text("Обновить") }
-            OutlinedButton(onClick = { state.logout() }) { Text("Выйти") }
+            OutlinedButton(onClick = { state.refreshAccount() }, shape = RectangleShape) { Text("Обновить") }
+            OutlinedButton(onClick = { state.logout() }, shape = RectangleShape) { Text("Выйти") }
         }
     }
 }

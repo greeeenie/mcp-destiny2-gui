@@ -1,19 +1,20 @@
 package org.example.overlay.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -27,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
@@ -37,13 +39,13 @@ import org.example.overlay.update.AppVersion
 import org.example.overlay.update.UpdateState
 import kotlin.math.roundToInt
 
-/** Обычное фокусируемое окно: аккаунт, голос, звук, оверлей (§5.3). */
+/** Обычное фокусируемое окно настроек: профиль, ассистент, голос, аудио и HUD. */
 @Composable
 fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
     val updateState by state.updateState.collectAsState()
 
-    val windowState = rememberWindowState(width = 900.dp, height = 620.dp)
+    val windowState = rememberWindowState(width = 1080.dp, height = 720.dp)
 
     Window(
         onCloseRequest = onClose,
@@ -64,23 +66,46 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
             Surface(modifier = Modifier.fillMaxSize()) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     UpdateBanner(updateState, onInstall = state::installUpdate)
-                    PrimaryTabRow(selectedTabIndex = tab) {
-                        TABS.forEachIndexed { index, title ->
-                            Tab(
-                                selected = tab == index,
-                                onClick = { tab = index },
-                                text = { Text(title) },
-                            )
+                    ConsoleTabs(selectedIndex = tab, onSelect = { tab = it })
+                    ConsolePage(TABS[tab].pageTitle, TABS[tab].mark) {
+                        when (TABS[tab]) {
+                            ConsoleTab.Profile -> AccountScreen(state)
+                            ConsoleTab.Assistant -> AssistantScreen(state)
+                            ConsoleTab.Voice -> VoiceScreen(state)
+                            ConsoleTab.Audio -> AudioScreen(state)
+                            ConsoleTab.Hud -> HudSettingsScreen(state)
                         }
                     }
-                    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
-                        when (tab) {
-                            0 -> AccountScreen(state)
-                            1 -> VoiceScreen(state)
-                            2 -> AudioScreen(state)
-                            else -> OverlaySettings(state)
-                        }
-                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsoleTabs(selectedIndex: Int, onSelect: (Int) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(62.dp).background(OverlayColors.Surface),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TABS.forEachIndexed { index, tab ->
+            Box(
+                modifier = Modifier.weight(1f).fillMaxHeight().clickable { onSelect(index) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    tab.label.uppercase(),
+                    color = if (index == selectedIndex) OverlayColors.Text else OverlayColors.TextDim,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.7.sp,
+                    textAlign = TextAlign.Center,
+                )
+                if (index == selectedIndex) {
+                    Box(
+                        Modifier.align(Alignment.BottomCenter).width(56.dp).height(2.dp)
+                            .background(OverlayColors.Accent),
+                    )
                 }
             }
         }
@@ -154,37 +179,69 @@ private fun UpdateBanner(state: UpdateState, onInstall: () -> Unit) {
  * запоминается при перетаскивании. Крутить руками остаётся прозрачность и время показа ответа.
  */
 @Composable
-private fun OverlaySettings(state: AppState) {
+private fun HudSettingsScreen(state: AppState) {
     val settings by state.settings.collectAsState()
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Прозрачность HUD", modifier = Modifier.width(180.dp), color = OverlayColors.TextDim, fontSize = 13.sp)
-        Slider(
-            value = settings.hud.opacity,
-            onValueChange = { value -> state.updateSettings { it.copy(hud = it.hud.copy(opacity = value)) } },
-            valueRange = 0.3f..1f,
-            modifier = Modifier.width(260.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Text("${(settings.hud.opacity * 100).roundToInt()} %", color = OverlayColors.Text, fontSize = 13.sp)
-    }
+    ConsoleSection("Внешний вид HUD") {
+        HudSliderRow(
+            label = "Прозрачность",
+            valueText = "${(settings.hud.opacity * 100).roundToInt()} %",
+        ) {
+            ConsoleSlider(
+                value = settings.hud.opacity,
+                onValueChange = { value -> state.updateSettings { it.copy(hud = it.hud.copy(opacity = value)) } },
+                valueRange = 0.3f..1f,
+                tickCount = 7,
+                modifier = Modifier.width(310.dp),
+            )
+        }
 
-    Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(18.dp))
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Свернуть после ответа", modifier = Modifier.width(180.dp), color = OverlayColors.TextDim, fontSize = 13.sp)
-        Slider(
-            value = settings.hud.collapseSeconds.toFloat(),
-            onValueChange = { value ->
-                state.updateSettings { it.copy(hud = it.hud.copy(collapseSeconds = value.roundToInt())) }
-            },
-            valueRange = HudSettings.MIN_COLLAPSE_SECONDS.toFloat()..HudSettings.MAX_COLLAPSE_SECONDS.toFloat(),
-            steps = HudSettings.MAX_COLLAPSE_SECONDS - HudSettings.MIN_COLLAPSE_SECONDS - 1,
-            modifier = Modifier.width(260.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Text("${settings.hud.collapseSeconds} с", color = OverlayColors.Text, fontSize = 13.sp)
+        HudSliderRow(
+            label = "Свернуть после ответа",
+            valueText = "${settings.hud.collapseSeconds} с",
+        ) {
+            ConsoleSlider(
+                value = settings.hud.collapseSeconds.toFloat(),
+                onValueChange = { value ->
+                    state.updateSettings { it.copy(hud = it.hud.copy(collapseSeconds = value.roundToInt())) }
+                },
+                valueRange = HudSettings.MIN_COLLAPSE_SECONDS.toFloat()..HudSettings.MAX_COLLAPSE_SECONDS.toFloat(),
+                divisions = HudSettings.MAX_COLLAPSE_SECONDS - HudSettings.MIN_COLLAPSE_SECONDS,
+                modifier = Modifier.width(310.dp),
+            )
+        }
     }
 }
 
-private val TABS = listOf("Аккаунт", "Голос", "Звук", "Оверлей")
+@Composable
+private fun HudSliderRow(
+    label: String,
+    valueText: String,
+    slider: @Composable () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.width(190.dp), color = OverlayColors.TextMuted, fontSize = 13.sp)
+        slider()
+        Spacer(Modifier.width(16.dp))
+        Box(
+            modifier = Modifier.width(64.dp).height(32.dp)
+                .background(OverlayColors.Control)
+                .border(1.dp, OverlayColors.ControlBorder),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(valueText, color = OverlayColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+private enum class ConsoleTab(val label: String, val pageTitle: String, val mark: ConsolePageMark) {
+    Profile("Профиль", "Профиль", ConsolePageMark.Profile),
+    Assistant("Ассистент", "Ассистент", ConsolePageMark.Assistant),
+    Voice("Голос", "Голос", ConsolePageMark.Voice),
+    Audio("Аудио", "Аудио", ConsolePageMark.Audio),
+    Hud("HUD", "HUD", ConsolePageMark.Hud),
+}
+
+private val TABS = ConsoleTab.entries

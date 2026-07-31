@@ -13,9 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -24,7 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
@@ -39,7 +36,6 @@ import org.example.overlay.audio.AudioDevices
 @Composable
 fun AudioScreen(state: AppState) {
     val settings by state.settings.collectAsState()
-    val level by state.micLevel.collectAsState()
     val message by state.audioMessage.collectAsState()
     val busy by state.audioBusy.collectAsState()
 
@@ -48,101 +44,91 @@ fun AudioScreen(state: AppState) {
     val outputs = remember(refreshKey) { AudioDevices.outputs() }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            DeviceList(
-                title = "Микрофон",
-                devices = inputs,
-                selectedName = settings.audio.inputMixer,
-                // Системное устройство хранится как null, а не как его имя: имя «по умолчанию»
-                // ничего не значит на другой машине.
-                onSelect = { device ->
-                    val name = device.mixer?.let { device.name }
-                    state.updateSettings { it.copy(audio = it.audio.copy(inputMixer = name)) }
-                },
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            ConsoleUtilityButton(
+                text = "Обновить устройства",
+                icon = { RefreshActionIcon() },
+                onClick = { refreshKey++ },
+                emphasized = true,
+                modifier = Modifier.width(226.dp),
             )
-            DeviceList(
-                title = "Вывод",
-                devices = outputs,
-                selectedName = settings.audio.outputMixer,
-                onSelect = { device ->
-                    val name = device.mixer?.let { device.name }
-                    state.updateSettings { it.copy(audio = it.audio.copy(outputMixer = name)) }
-                },
+            ConsoleUtilityButton(
+                text = "Эхо-тест: 5 секунд",
+                icon = { SpeakerActionIcon() },
+                onClick = state::runAudioSelfTest,
+                enabled = !busy,
+                modifier = Modifier.width(218.dp),
             )
         }
 
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { refreshKey++ }) { Text("Обновить список") }
-            Button(onClick = { state.runAudioSelfTest() }, enabled = !busy) {
-                Text("Эхо-тест: 5 секунд")
+        Spacer(Modifier.height(30.dp))
+        SectionColumns {
+            ConsoleSection("Микрофон", Modifier.weight(1f)) {
+                DeviceList(
+                    devices = inputs,
+                    selectedName = settings.audio.inputMixer,
+                    // Системное устройство хранится как null, а не как его имя: имя «по умолчанию»
+                    // ничего не значит на другой машине.
+                    onSelect = { device ->
+                        val name = device.mixer?.let { device.name }
+                        state.updateSettings { it.copy(audio = it.audio.copy(inputMixer = name)) }
+                    },
+                )
+            }
+
+            androidx.compose.material3.VerticalDivider(
+                modifier = Modifier.height(275.dp),
+                color = OverlayColors.Divider,
+            )
+
+            ConsoleSection("Вывод", Modifier.weight(1f)) {
+                DeviceList(
+                    devices = outputs,
+                    selectedName = settings.audio.outputMixer,
+                    onSelect = { device ->
+                        val name = device.mixer?.let { device.name }
+                        state.updateSettings { it.copy(audio = it.audio.copy(outputMixer = name)) }
+                    },
+                )
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-        Text("Уровень входа", color = OverlayColors.TextDim, fontSize = 12.sp)
-        LevelBar(level)
-
         message?.let {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             Text(it, color = OverlayColors.Text, fontSize = 13.sp)
         }
-
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "Новое устройство, воткнутое после запуска, появится в списке только после перезапуска — " +
-                "так работает JavaSound, а не наш код.",
-            color = OverlayColors.TextDim,
-            fontSize = 11.sp,
-        )
     }
 }
 
 @Composable
 private fun DeviceList(
-    title: String,
     devices: List<AudioDevice>,
     selectedName: String?,
     onSelect: (AudioDevice) -> Unit,
 ) {
-    Column(modifier = Modifier.width(380.dp)) {
-        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = OverlayColors.Text)
-        Spacer(Modifier.height(6.dp))
-        LazyColumn(modifier = Modifier.fillMaxWidth().height(220.dp)) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        LazyColumn(modifier = Modifier.fillMaxWidth().height(205.dp)) {
             items(devices) { device ->
                 val isSelected = device.name == (selectedName ?: AudioDevices.SYSTEM_DEFAULT)
-                Text(
-                    text = device.name,
-                    color = if (isSelected) OverlayColors.Accent else OverlayColors.Text,
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 1.dp)
-                        .background(
-                            color = if (isSelected) OverlayColors.Surface else OverlayColors.Background,
-                            shape = RoundedCornerShape(6.dp),
-                        )
-                        .clickable { onSelect(device) }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 3.dp)
+                        .height(38.dp)
+                        .background(if (isSelected) OverlayColors.ControlSelected else OverlayColors.Control)
+                        .clickable { onSelect(device) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.width(3.dp).height(38.dp)
+                            .background(if (isSelected) OverlayColors.Accent else OverlayColors.Control),
+                    )
+                    Text(
+                        text = device.name,
+                        color = if (isSelected) OverlayColors.Text else OverlayColors.TextMuted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                    )
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun LevelBar(level: Float) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(8.dp)
-            .background(OverlayColors.Surface, RoundedCornerShape(4.dp)),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(level.coerceIn(0f, 1f))
-                .height(8.dp)
-                .background(OverlayColors.Ok, RoundedCornerShape(4.dp)),
-        )
     }
 }
