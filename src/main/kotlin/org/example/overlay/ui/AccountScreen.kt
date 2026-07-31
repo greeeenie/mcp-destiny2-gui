@@ -1,5 +1,6 @@
 package org.example.overlay.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
@@ -137,13 +139,23 @@ private fun ProfileCard(state: AppState) {
                 false -> OverlayColors.Warn
                 null -> OverlayColors.TextDim
             },
+            // Отвязка — тихая ссылка прямо у статуса, а не отдельная кнопка: действие
+            // редкое и живёт там же, где написано «привязан».
+            trailing = if (linked == true) {
+                {
+                    Text(
+                        "отвязать",
+                        color = OverlayColors.TextDim,
+                        fontSize = 13.sp,
+                        textDecoration = TextDecoration.Underline,
+                        modifier = Modifier.clickable { state.unlinkBungie() },
+                    )
+                }
+            } else {
+                null
+            },
         )
         profile?.bungieProfile?.displayName?.let { InfoRow("Имя Bungie", it) }
-
-        if (linked == true) {
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { state.unlinkBungie() }) { Text("Отвязать аккаунт") }
-        }
 
         if (linked == false) {
             Spacer(Modifier.height(8.dp))
@@ -186,9 +198,21 @@ private fun ProfileCard(state: AppState) {
 }
 
 @Composable
-private fun InfoRow(label: String, value: String, valueColor: androidx.compose.ui.graphics.Color = OverlayColors.Text) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+private fun InfoRow(
+    label: String,
+    value: String,
+    valueColor: androidx.compose.ui.graphics.Color = OverlayColors.Text,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(label, modifier = Modifier.width(200.dp), color = OverlayColors.TextDim, fontSize = 13.sp)
         Text(value, color = valueColor, fontSize = 13.sp)
+        trailing?.let {
+            Spacer(Modifier.width(12.dp))
+            it()
+        }
     }
 }
