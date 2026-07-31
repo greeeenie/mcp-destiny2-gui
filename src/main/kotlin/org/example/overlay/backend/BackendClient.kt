@@ -66,9 +66,9 @@ class BackendClient(
     suspend fun profile(token: String): Profile =
         rawGet("/profile", token).requireSuccess().parse(Profile::class.java)
 
-    /** Отвязать Bungie-аккаунт от MCP-профиля. */
+    /** Отвязать Bungie-аккаунт: прокси-ручка бэкенда, дальше он сам идёт в mcp-destiny2. */
     suspend fun unlinkBungie(token: String) {
-        send(request("/mcp-profile/bungie-profile", token, DEFAULT_TIMEOUT).DELETE().build()).requireSuccess()
+        send(request("/profile/bungie-profile", token, DEFAULT_TIMEOUT).DELETE().build()).requireSuccess()
     }
 
     /**
