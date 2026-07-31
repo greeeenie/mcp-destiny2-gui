@@ -39,7 +39,7 @@ import org.example.overlay.update.AppVersion
 import org.example.overlay.update.UpdateState
 import kotlin.math.roundToInt
 
-/** Обычное фокусируемое окно настроек: профиль, ассистент, голос, аудио и HUD. */
+/** Обычное фокусируемое окно настроек: профиль, ассистент, голос и HUD. */
 @Composable
 fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
@@ -67,12 +67,11 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     UpdateBanner(updateState, onInstall = state::installUpdate)
                     ConsoleTabs(selectedIndex = tab, onSelect = { tab = it })
-                    ConsolePage(TABS[tab].pageTitle, TABS[tab].mark) {
+                    ConsolePage(TABS[tab].pageTitle, TABS[tab].markAsset) {
                         when (TABS[tab]) {
                             ConsoleTab.Profile -> AccountScreen(state)
                             ConsoleTab.Assistant -> AssistantScreen(state)
                             ConsoleTab.Voice -> VoiceScreen(state)
-                            ConsoleTab.Audio -> AudioScreen(state)
                             ConsoleTab.Hud -> HudSettingsScreen(state)
                         }
                     }
@@ -236,12 +235,11 @@ private fun HudSliderRow(
     }
 }
 
-private enum class ConsoleTab(val label: String, val pageTitle: String, val mark: ConsolePageMark) {
-    Profile("Профиль", "Профиль", ConsolePageMark.Profile),
-    Assistant("Ассистент", "Ассистент", ConsolePageMark.Assistant),
-    Voice("Голос", "Голос", ConsolePageMark.Voice),
-    Audio("Аудио", "Аудио", ConsolePageMark.Audio),
-    Hud("HUD", "HUD", ConsolePageMark.Hud),
+private enum class ConsoleTab(val label: String, val pageTitle: String, val markAsset: String) {
+    Profile("Профиль", "Профиль", "icons/page-mark-profile.png"),
+    Assistant("Ассистент", "Ассистент", "icons/page-mark-assistant.png"),
+    Voice("Голос", "Голос", "icons/page-mark-voice.png"),
+    Hud("HUD", "HUD", "icons/page-mark-hud.png"),
 }
 
 private val TABS = ConsoleTab.entries

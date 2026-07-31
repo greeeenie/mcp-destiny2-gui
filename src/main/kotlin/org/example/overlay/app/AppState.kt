@@ -12,9 +12,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import org.example.overlay.audio.AudioDeviceException
-import org.example.overlay.audio.AudioDevices
-import org.example.overlay.audio.AudioSelfTest
 import org.example.overlay.backend.AuthorizationLink
 import org.example.overlay.backend.BackendClient
 import org.example.overlay.backend.BackendException
@@ -101,12 +98,6 @@ class AppState(
 
     private val _micLevel = MutableStateFlow(0f)
     val micLevel: StateFlow<Float> = _micLevel.asStateFlow()
-
-    private val _audioMessage = MutableStateFlow<String?>(null)
-    val audioMessage: StateFlow<String?> = _audioMessage.asStateFlow()
-
-    private val _audioBusy = MutableStateFlow(false)
-    val audioBusy: StateFlow<Boolean> = _audioBusy.asStateFlow()
 
     private val _userTranscript = MutableStateFlow("")
     val userTranscript: StateFlow<String> = _userTranscript.asStateFlow()
@@ -342,35 +333,6 @@ class AppState(
         _chatModels.value = runCatching { backend.voiceModels(token) }
             .onFailure { error -> log.warn("Список моделей не загрузился: {}", error.toString()) }
             .getOrNull()
-    }
-
-    // --- звук ---
-
-    /** Эхо-тест фазы 2: пишем несколько секунд и проигрываем обратно. */
-    fun runAudioSelfTest(seconds: Int = AudioSelfTest.DEFAULT_SECONDS) {
-        if (_audioBusy.value) return
-        scope.launch {
-            _audioBusy.value = true
-            _audioMessage.value = "Говори — идёт запись…"
-            try {
-                val settings = settingsHolder.current.audio
-                val report = AudioSelfTest(scope).run(
-                    inputMixer = AudioDevices.resolve(settings.inputMixer, AudioDevices.inputs()),
-                    outputMixer = AudioDevices.resolve(settings.outputMixer, AudioDevices.outputs()),
-                    seconds = seconds,
-                    onLevel = { level -> _micLevel.value = level },
-                )
-                _audioMessage.value = report
-            } catch (error: AudioDeviceException) {
-                _audioMessage.value = error.message
-            } catch (error: Exception) {
-                log.warn("Эхо-тест не удался", error)
-                _audioMessage.value = error.message ?: error.javaClass.simpleName
-            } finally {
-                _micLevel.value = 0f
-                _audioBusy.value = false
-            }
-        }
     }
 
     // --- привязка Bungie (§6 фазы) ---
