@@ -466,7 +466,10 @@ fun HudWindow(state: AppState) {
                                     animationSpec = tween(ICON_FADE_MS),
                                 ) { (counting, current) ->
                                     if (counting) {
-                                        GhostCountdownIcon(collapseFraction ?: 1f, Modifier.size(26.dp))
+                                        // Пока уходящая иконка отсчёта дотаивает в Crossfade,
+                                        // fraction уже null: держим её полностью потухшей, иначе
+                                        // ядро вспыхивает на пару кадров перед сворачиванием.
+                                        GhostCountdownIcon(collapseFraction ?: 0f, Modifier.size(26.dp))
                                     } else {
                                         HudStatusIcon(current, micLevel, Modifier.size(26.dp))
                                     }
