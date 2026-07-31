@@ -17,6 +17,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,12 +43,23 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
     val updateState by state.updateState.collectAsState()
 
+    val windowState = rememberWindowState(width = 900.dp, height = 620.dp)
+
     Window(
         onCloseRequest = onClose,
         title = "Destiny 2 Assistant — консоль",
         icon = painterResource("icons/app-icon.png"),
-        state = rememberWindowState(width = 900.dp, height = 620.dp),
+        state = windowState,
     ) {
+        // «Открыть консоль» из шестерёнки или трея: окно может быть свёрнуто в панель
+        // задач — сама видимость его не развернёт. Разворачиваем и поднимаем наверх.
+        LaunchedEffect(Unit) {
+            state.consoleRaise.collect {
+                windowState.isMinimized = false
+                window.toFront()
+            }
+        }
+
         OverlayTheme {
             Surface(modifier = Modifier.fillMaxSize()) {
                 Column(modifier = Modifier.fillMaxSize()) {

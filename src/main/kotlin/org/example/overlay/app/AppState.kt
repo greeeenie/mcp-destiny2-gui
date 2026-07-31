@@ -75,6 +75,10 @@ class AppState(
     private val _consoleVisible = MutableStateFlow(false)
     val consoleVisible: StateFlow<Boolean> = _consoleVisible.asStateFlow()
 
+    /** Растёт на каждый [openConsole]: консоль по нему разворачивается из свёрнутого. */
+    private val _consoleRaise = MutableStateFlow(0)
+    val consoleRaise: StateFlow<Int> = _consoleRaise.asStateFlow()
+
     private val _session = MutableStateFlow<StoredSession?>(null)
     val session: StateFlow<StoredSession?> = _session.asStateFlow()
 
@@ -294,6 +298,16 @@ class AppState(
 
     fun setConsoleVisible(visible: Boolean) {
         _consoleVisible.value = visible
+    }
+
+    /**
+     * Открыть консоль по-настоящему: окно может уже существовать, но быть свёрнутым —
+     * одна лишь видимость его не разворачивает. Счётчик — сигнал окну развернуться
+     * и подняться наверх (см. `ConsoleWindow`).
+     */
+    fun openConsole() {
+        _consoleVisible.value = true
+        _consoleRaise.update { it + 1 }
     }
 
     fun toggleConsole() = _consoleVisible.update { !it }

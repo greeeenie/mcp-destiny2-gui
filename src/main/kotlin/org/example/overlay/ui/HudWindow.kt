@@ -532,7 +532,7 @@ private fun WindowScope.ExpandedHud(
                 micLevel = micLevel,
                 listening = listening,
                 chromeAlpha = chromeAlpha,
-                onOpenConsole = { state.setConsoleVisible(true) },
+                onOpenConsole = { state.openConsole() },
             )
 
             voiceMessage?.let { message ->

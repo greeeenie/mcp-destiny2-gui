@@ -62,7 +62,7 @@ fun main() {
             tooltip = "Destiny 2 Assistant",
             onAction = { state.toggleConsole() },
             menu = {
-                Item("Консоль", onClick = { state.setConsoleVisible(true) })
+                Item("Консоль", onClick = { state.openConsole() })
                 Item("Выход", onClick = { exitApplication() })
             },
         )
