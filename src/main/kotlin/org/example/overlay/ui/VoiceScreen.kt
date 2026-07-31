@@ -72,6 +72,18 @@ fun VoiceScreen(state: AppState) {
                 onSelect = { choice -> state.updateSettings { it.copy(chatModel = choice) } },
             )
             WebSearchIndicator(available, settings.chatModel)
+
+            // Старый сервер список STT не отдаёт — селектор тогда не показываем вовсе.
+            if (available.sttOptions.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                ModelSelector(
+                    title = "Модель распознавания",
+                    options = available.sttOptions,
+                    default = available.sttDefault,
+                    current = settings.sttModel,
+                    onSelect = { choice -> state.updateSettings { it.copy(sttModel = choice) } },
+                )
+            }
         }
 
         Spacer(Modifier.height(16.dp))
