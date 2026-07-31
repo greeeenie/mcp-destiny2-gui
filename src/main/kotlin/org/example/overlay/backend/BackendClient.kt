@@ -67,6 +67,14 @@ class BackendClient(
         rawGet("/profile", token).requireSuccess().parse(Profile::class.java)
 
     /**
+     * Отвязать Bungie-аккаунт от MCP-профиля. Ручки на сервере пока нет — до её появления
+     * вызов честно вернёт ошибку бэкенда; путь согласован на будущее.
+     */
+    suspend fun unlinkBungie(token: String) {
+        send(request("/profile/bungie", token, DEFAULT_TIMEOUT).DELETE().build()).requireSuccess()
+    }
+
+    /**
      * Вызов инструмента. Таймаут больше обычного: MCP-сессия на той стороне поднимается
      * на каждый запрос (риск 2), а обрывать инструмент раньше сервера бессмысленно.
      */

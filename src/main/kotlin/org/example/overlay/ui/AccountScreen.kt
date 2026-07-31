@@ -140,6 +140,11 @@ private fun ProfileCard(state: AppState) {
         )
         profile?.bungieProfile?.displayName?.let { InfoRow("Имя Bungie", it) }
 
+        if (linked == true) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = { state.unlinkBungie() }) { Text("Отвязать аккаунт") }
+        }
+
         if (linked == false) {
             Spacer(Modifier.height(8.dp))
             Text(

@@ -374,6 +374,15 @@ class AppState(
         }
     }
 
+    /**
+     * Кнопка «Отвязать аккаунт». Серверная ручка ещё не поднята: до неё клик покажет
+     * ошибку бэкенда, а когда появится — заработает без правок здесь.
+     */
+    fun unlinkBungie() = launchAccount {
+        backend.unlinkBungie(requireToken())
+        loadAccountData(requireToken())
+    }
+
     fun dismissAuthorizationPrompt() {
         authPollJob?.cancel()
         authPollJob = null
