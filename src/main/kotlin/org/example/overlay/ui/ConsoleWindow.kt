@@ -1,8 +1,13 @@
 package org.example.overlay.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +17,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -26,13 +33,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPosition
+import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.rememberWindowState
+import java.awt.Toolkit
 import org.example.overlay.app.AppState
 import org.example.overlay.app.HudSettings
 import org.example.overlay.update.AppVersion
@@ -45,13 +59,22 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
     val updateState by state.updateState.collectAsState()
 
-    val windowState = rememberWindowState(width = 1080.dp, height = 720.dp)
+    // 850×720 на Full HD; на других разрешениях — та же доля экрана, чтобы масштаб совпадал.
+    val windowState = rememberWindowState(
+        size = remember {
+            val screen = Toolkit.getDefaultToolkit().screenSize
+            DpSize((screen.width * 850f / 1920f).dp, (screen.height * 720f / 1080f).dp)
+        },
+        position = WindowPosition(Alignment.Center),
+    )
 
     Window(
         onCloseRequest = onClose,
         title = "Destiny 2 Assistant — консоль",
         icon = painterResource("icons/app-icon.png"),
         state = windowState,
+        undecorated = true,
+        resizable = false,
     ) {
         // «Открыть консоль» из шестерёнки или трея: окно может быть свёрнуто в панель
         // задач — сама видимость его не развернёт. Разворачиваем и поднимаем наверх.
@@ -64,7 +87,13 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
 
         OverlayTheme {
             Surface(modifier = Modifier.fillMaxSize()) {
-                Column(modifier = Modifier.fillMaxSize()) {
+                // У окна без системной рамки нет и системной обводки — тонкая своя, чтобы
+                // консоль не сливалась с тёмным фоном других окон.
+                Column(modifier = Modifier.fillMaxSize().border(1.dp, OverlayColors.Divider)) {
+                    ConsoleTitleBar(
+                        onMinimize = { windowState.isMinimized = true },
+                        onClose = onClose,
+                    )
                     UpdateBanner(updateState, onInstall = state::installUpdate)
                     ConsoleTabs(selectedIndex = tab, onSelect = { tab = it })
                     ConsolePage(TABS[tab].pageTitle, TABS[tab].markAsset) {
@@ -80,6 +109,72 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
         }
     }
 }
+
+/**
+ * Своя шапка окна вместо системной: тянуть можно за всю полосу, справа — свернуть и закрыть.
+ * Развернуть на весь экран консоли незачем, поэтому кнопки всего две.
+ */
+@Composable
+private fun WindowScope.ConsoleTitleBar(onMinimize: () -> Unit, onClose: () -> Unit) {
+    WindowDraggableArea {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(TITLE_BAR_HEIGHT).background(OverlayColors.Background),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Spacer(Modifier.width(14.dp))
+            Image(
+                painter = painterResource("icons/app-icon.png"),
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "DESTINY 2 ASSISTANT",
+                color = OverlayColors.TextDim,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.9.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            TitleBarButton(hoverBackground = OverlayColors.ControlSelected, onClick = onMinimize) { color ->
+                drawLine(
+                    color,
+                    Offset(0f, size.height / 2f),
+                    Offset(size.width, size.height / 2f),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            }
+            TitleBarButton(hoverBackground = OverlayColors.Error, onClick = onClose) { color ->
+                drawLine(color, Offset.Zero, Offset(size.width, size.height), strokeWidth = 1.dp.toPx())
+                drawLine(color, Offset(0f, size.height), Offset(size.width, 0f), strokeWidth = 1.dp.toPx())
+            }
+        }
+    }
+}
+
+@Composable
+private fun TitleBarButton(
+    hoverBackground: Color,
+    onClick: () -> Unit,
+    icon: DrawScope.(Color) -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    Box(
+        modifier = Modifier
+            .width(46.dp)
+            .height(TITLE_BAR_HEIGHT)
+            .hoverable(interaction)
+            .background(if (hovered) hoverBackground else Color.Transparent)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        val color = if (hovered) OverlayColors.Text else OverlayColors.TextDim
+        Canvas(Modifier.size(10.dp)) { icon(color) }
+    }
+}
+
+private val TITLE_BAR_HEIGHT = 34.dp
 
 @Composable
 private fun ConsoleTabs(selectedIndex: Int, onSelect: (Int) -> Unit) {
