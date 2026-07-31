@@ -632,7 +632,9 @@ private fun WindowScope.HudHeader(
                 .clickable(onClick = onOpenConsole),
             contentAlignment = Alignment.Center,
         ) {
-            GearIcon(OverlayColors.TextDim, Modifier.size(16.dp))
+            // Под стать иконке-призраку (26 dp): шестерёнка компактнее по силуэту,
+            // поэтому визуально ровня ему чуть меньшим размером.
+            GearIcon(OverlayColors.TextDim, Modifier.size(20.dp))
         }
     }
 }
