@@ -31,8 +31,12 @@ open class BackendException(
     cause: Throwable? = null,
 ) : RuntimeException(message, cause)
 
-/** 401. Refresh-ручки нет, поэтому единственная реакция — экран логина (§4). */
-class UnauthorizedException(message: String) : BackendException(401, message)
+/**
+ * 401 и 403. Refresh-ручки нет, поэтому единственная реакция — экран логина (§4).
+ * 403 здесь же: Spring Security на протухший или битый токен отвечает «403 Forbidden»,
+ * а не 401, и для клиента это та же ситуация — сессия больше не действует.
+ */
+class UnauthorizedException(message: String, statusCode: Int = 401) : BackendException(statusCode, message)
 
 /**
  * Клиент `mcp-destiny2-client` на `java.net.http`: лишних зависимостей нет (§7). С Inworld
@@ -135,7 +139,9 @@ class BackendClient(
                 throw BackendException(0, "Бэкенд недоступен: ${error.message ?: error.javaClass.simpleName}", error)
             }
             response.body().use { input ->
-                if (response.statusCode() == 401) throw UnauthorizedException("Сессия недействительна")
+                if (response.statusCode() == 401 || response.statusCode() == 403) {
+                    throw UnauthorizedException("Сессия недействительна", response.statusCode())
+                }
                 if (response.statusCode() !in 200..299) {
                     throw BackendException(response.statusCode(), "Бэкенд ответил HTTP ${response.statusCode()}")
                 }
@@ -215,7 +221,7 @@ class BackendClient(
     private fun HttpResponse<String>.requireSuccess(): HttpResponse<String> {
         if (statusCode() in 200..299) return this
         val message = errorMessage(body()) ?: "Бэкенд ответил HTTP ${statusCode()}"
-        if (statusCode() == 401) throw UnauthorizedException(message)
+        if (statusCode() == 401 || statusCode() == 403) throw UnauthorizedException(message, statusCode())
         throw BackendException(statusCode(), message)
     }
 

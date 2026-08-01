@@ -30,6 +30,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /** Логин, регистрация и карточка профиля (§3.1, фаза 1). */
 @Composable
@@ -156,6 +160,17 @@ private fun ProfileCard(state: AppState) {
         )
         profile?.bungieProfile?.displayName?.let { InfoRow("Имя Bungie", it) }
 
+        // Свежесть данных: ассистент отвечает по последнему слепку инвентаря, и игроку видно,
+        // насколько тот отстал от игры.
+        if (linked == true) {
+            val syncedAt = profile?.bungieProfile?.inventorySyncedAt
+            InfoRow(
+                label = "Синхронизация",
+                value = syncedAt?.let(::formatSyncedAt) ?: "ещё не выполнялась",
+                valueColor = if (syncedAt != null) OverlayColors.Text else OverlayColors.TextDim,
+            )
+        }
+
         if (linked == false) {
             Spacer(Modifier.height(8.dp))
             Text(
@@ -203,6 +218,22 @@ private fun ProfileCard(state: AppState) {
         }
     }
 }
+
+/** «2 ч назад (31.07 21:15)»: расстояние до сейчас — чтобы оценить свежесть без арифметики,
+ * точное локальное время — чтобы свериться при желании. Непарсибельная строка уходит как есть. */
+private fun formatSyncedAt(iso: String): String = runCatching {
+    val instant = Instant.parse(iso)
+    val minutes = Duration.between(instant, Instant.now()).toMinutes()
+    val relative = when {
+        minutes < 1 -> "только что"
+        minutes < 60 -> "$minutes мин назад"
+        minutes < 60 * 24 -> "${minutes / 60} ч назад"
+        else -> "${minutes / (60 * 24)} дн назад"
+    }
+    val local = DateTimeFormatter.ofPattern("dd.MM HH:mm")
+        .format(instant.atZone(ZoneId.systemDefault()))
+    "$relative ($local)"
+}.getOrDefault(iso)
 
 @Composable
 private fun InfoRow(
