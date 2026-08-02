@@ -38,6 +38,9 @@ data class Settings(
 data class HudSettings(
     val x: Float? = null,
     val y: Float? = null,
+    /** Якорные края сохраняются явно: по одной координате нельзя однозначно восстановить их у центра экрана. */
+    val anchorEnd: Boolean? = null,
+    val anchorBottom: Boolean? = null,
     val opacity: Float = 0.82f,
     val fontSize: Float = 13f,
     /** Через сколько секунд после ответа HUD сворачивается в пилюлю. Меньше [MIN_COLLAPSE_SECONDS] не даём. */

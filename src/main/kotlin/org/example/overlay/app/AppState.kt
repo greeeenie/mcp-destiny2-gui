@@ -51,14 +51,8 @@ class AppState(
         settings = settingsHolder,
         backend = backend,
         tokenProvider = { _session.value?.token },
-        onUserText = { text ->
-            _userTranscript.value = text
-            _assistantTranscript.value = assistantBuffer.clear()
-            // Журнал инструментов и строка ошибки относятся к ходу: с прошлого хода в HUD
-            // висели чужие строки, а сообщение само не гаснет.
-            _toolLog.value = emptyList()
-            _voiceMessage.value = null
-        },
+        onTurnStarted = ::prepareHudForNewTurn,
+        onUserText = ::replaceHudFeedForNewTurn,
         onEvent = ::onChatEvent,
         onMicLevel = { level -> _micLevel.value = level },
         onError = { message -> _voiceMessage.value = message },
@@ -108,6 +102,14 @@ class AppState(
     private val _voiceMessage = MutableStateFlow<String?>(null)
     val voiceMessage: StateFlow<String?> = _voiceMessage.asStateFlow()
 
+    /** Завершённые ходы для листания прошлых ответов в HUD: хвост из [MAX_TURN_HISTORY]. */
+    private val _turnHistory = MutableStateFlow<List<HudTurn>>(emptyList())
+    val turnHistory: StateFlow<List<HudTurn>> = _turnHistory.asStateFlow()
+
+    /** null — живая лента; иначе индекс хода из [turnHistory], который сейчас смотрит игрок. */
+    private val _turnHistoryIndex = MutableStateFlow<Int?>(null)
+    val turnHistoryIndex: StateFlow<Int?> = _turnHistoryIndex.asStateFlow()
+
     /** Ссылка авторизации Bungie: пока она есть, в HUD висит плашка «открой и вернись». */
     private val _authUrl = MutableStateFlow<String?>(null)
     val authUrl: StateFlow<String?> = _authUrl.asStateFlow()
@@ -140,6 +142,14 @@ class AppState(
     private val _hudDismissed = MutableStateFlow(false)
     val hudDismissed: StateFlow<Boolean> = _hudDismissed.asStateFlow()
 
+    /**
+     * Номер живой ленты и её мьютекс. Отсчёт и голосовой ход живут в общем
+     * Dispatchers.Default и могут закончиться одновременно. Номер не даёт старому отсчёту
+     * очистить уже начавшийся новый ход, а мьютекс делает проверку и очистку неразрывными.
+     */
+    private val hudFeedLock = Any()
+    private val _hudFeedRevision = MutableStateFlow(0L)
+
     init {
         restoreSession()
         // Микрофон и клавиша поднимаются сразу: соединения это не открывает, а «включать голос»
@@ -150,6 +160,20 @@ class AppState(
             combine(voice.phase, voice.ready, ::resolveStatus).collect { _status.value = it }
         }
         scope.launch { runCollapseCountdown() }
+        scope.launch { refreshProfilePeriodically() }
+    }
+
+    /**
+     * Профиль подтягивается фоном: время синхронизации инвентаря в HUD должно расти
+     * от реальной последней синхронизации, а не от момента логина.
+     */
+    private suspend fun refreshProfilePeriodically() {
+        while (true) {
+            delay(PROFILE_REFRESH_MS)
+            val token = _session.value?.token ?: continue
+            runCatching { _profile.value = backend.profile(token) }
+                .onFailure { error -> log.debug("Фоновое обновление профиля не удалось: {}", error.toString()) }
+        }
     }
 
     /**
@@ -160,16 +184,33 @@ class AppState(
      * Плашка авторизации Bungie отсчёт блокирует: её нельзя «досмотреть», по ней нужно сходить.
      */
     private suspend fun runCollapseCountdown() {
-        val hasContent = combine(_userTranscript, _assistantTranscript, _toolLog, _voiceMessage) { user, answer, tools, message ->
-            user.isNotBlank() || answer.isNotBlank() || tools.isNotEmpty() || message != null
+        // Просмотр истории — тоже контент: без него HUD с открытым прошлым ответом
+        // не попадал бы под отсчёт и висел бы развёрнутым вечно.
+        val hasContent = combine(
+            _userTranscript,
+            _assistantTranscript,
+            _toolLog,
+            _voiceMessage,
+            _turnHistoryIndex,
+        ) { user, answer, tools, message, viewing ->
+            user.isNotBlank() || answer.isNotBlank() || tools.isNotEmpty() || message != null || viewing != null
         }
-        combine(_status, hasContent, _authUrl) { status, content, auth ->
-            status == OverlayStatus.Ready && content && auth == null
+        combine(_status, hasContent, _authUrl, _hudFeedRevision, _hudHovered) {
+                status, content, auth, revision, hovered ->
+            Triple(status == OverlayStatus.Ready && content && auth == null, revision, hovered)
         }
             .distinctUntilChanged()
-            .collectLatest { eligible ->
+            .collectLatest { (eligible, revision, hovered) ->
                 if (!eligible) {
                     _collapseFraction.value = null
+                    _hudDismissed.value = false
+                    return@collectLatest
+                }
+                if (hovered) {
+                    // Наведение отменяет даже уже начавшуюся задержку очистки. После ухода
+                    // новый upstream-снимок запустит полный отсчёт с начала.
+                    _hudDismissed.value = false
+                    _collapseFraction.value = 1f
                     return@collectLatest
                 }
                 val totalMs = settings.value.hud.collapseSeconds
@@ -186,33 +227,112 @@ class AppState(
                         _collapseFraction.value = (remainingMs.toFloat() / totalMs).coerceAtLeast(0f)
                     }
                 }
-                _collapseFraction.value = null
-                _hudDismissed.value = true
-                try {
-                    // Панель схлопывается с ещё живым контентом; чистим, когда анимация точно
-                    // закончилась. Отмена (новый ход, плашка авторизации) тоже проходит через
-                    // finally: свёрнутый ответ в любом случае больше не нужен.
-                    delay(HUD_DISMISS_CLEAR_MS)
-                } finally {
-                    clearHudFeed()
-                    _hudDismissed.value = false
+                val dismissalStarted = synchronized(hudFeedLock) {
+                    if (_hudFeedRevision.value != revision || _hudHovered.value) {
+                        false
+                    } else {
+                        // Сначала скрываем панель и только потом убираем кольцо. Обратный порядок
+                        // давал один кадр развёрнутого HUD без статусной иконки.
+                        _hudDismissed.value = true
+                        _collapseFraction.value = null
+                        true
+                    }
+                }
+                if (!dismissalStarted) return@collectLatest
+
+                // Отмена collectLatest больше не чистит ленту в finally: новый ход может уже успеть
+                // записать свой текст. После анимации чистим только ту же ревизию.
+                delay(HUD_DISMISS_CLEAR_MS)
+                synchronized(hudFeedLock) {
+                    if (_hudFeedRevision.value == revision && !_hudHovered.value) {
+                        clearHudFeedLocked()
+                        _hudDismissed.value = false
+                    }
                 }
             }
     }
 
-    fun setHudHovered(hovered: Boolean) {
+    /**
+     * Наведение на пустой HUD сразу открывает последний ответ: игрок навёл курсор именно затем,
+     * чтобы перечитать сказанное. Курсор ушёл — открытый ход закрывается, и HUD сворачивается.
+     * Живую ленту не трогаем: пока на экране висит свежий ответ, показывать нужно его.
+     */
+    fun setHudHovered(hovered: Boolean) = synchronized(hudFeedLock) {
         _hudHovered.value = hovered
+        if (_assistantTranscript.value.isNotBlank() || _userTranscript.value.isNotBlank()) {
+            return@synchronized
+        }
+        val last = _turnHistory.value.lastIndex.takeIf { it >= 0 }
+        _turnHistoryIndex.update { current ->
+            when {
+                hovered -> current ?: last
+                // Игрок ушёл вглубь истории — оставляем открытое. Панель под курсором меняет
+                // размер, и уход указателя за её край нельзя считать отказом читать; страница
+                // закроется отсчётом, как обычный ответ.
+                current != null && current != last -> current
+                else -> null
+            }
+        }
     }
 
     fun installUpdate() = updates.install()
 
     /** Убрать с экрана прошедший ход. Только лента HUD: серверная история не трогается. */
-    private fun clearHudFeed() {
+    private fun prepareHudForNewTurn() = synchronized(hudFeedLock) {
+        _hudFeedRevision.value += 1
+        clearHudFeedLocked()
+        _collapseFraction.value = null
+        _hudDismissed.value = false
+    }
+
+    private fun replaceHudFeedForNewTurn(text: String) = synchronized(hudFeedLock) {
+        _hudFeedRevision.value += 1
+        // Старая лента и режим истории исчезают до публикации новой фразы. Так UI не успевает
+        // собрать переходный кадр из нового вопроса и старого ответа/ошибки.
+        clearHudFeedLocked()
+        _userTranscript.value = text
+        _collapseFraction.value = null
+        _hudDismissed.value = false
+    }
+
+    private fun clearHudFeedLocked() {
         _userTranscript.value = ""
         _assistantTranscript.value = assistantBuffer.clear()
         _toolLog.value = emptyList()
         _voiceMessage.value = null
+        _turnHistoryIndex.value = null
     }
+
+    /**
+     * Показать предыдущий ответ. С живой ленты уходим на предпоследний ход: последний
+     * и есть то, что на экране. Если лента уже пуста — на последний.
+     */
+    fun showPreviousTurn() {
+        val history = _turnHistory.value
+        if (history.isEmpty()) return
+        _turnHistoryIndex.update { current ->
+            when {
+                current != null -> (current - 1).coerceAtLeast(0)
+                _assistantTranscript.value.isBlank() -> history.size - 1
+                else -> (history.size - 2).coerceAtLeast(0)
+            }
+        }
+    }
+
+    /**
+     * Вперёд по истории. С последнего хода уходим на живую ленту, если ей есть что показать,
+     * иначе остаёмся на нём: дальше свежего ответа истории не бывает.
+     */
+    fun showNextTurn() {
+        val current = _turnHistoryIndex.value ?: return
+        val last = _turnHistory.value.lastIndex
+        _turnHistoryIndex.value = when {
+            current < last -> current + 1
+            _assistantTranscript.value.isNotBlank() -> null
+            else -> current
+        }
+    }
+
 
     // --- голос ---
 
@@ -249,10 +369,13 @@ class AppState(
         scope.launch {
             try {
                 backend.clearVoiceHistory(requireToken())
-                _userTranscript.value = ""
-                _assistantTranscript.value = assistantBuffer.clear()
-                _toolLog.value = emptyList()
-                _voiceMessage.value = null
+                synchronized(hudFeedLock) {
+                    _hudFeedRevision.value += 1
+                    clearHudFeedLocked()
+                    _turnHistory.value = emptyList()
+                    _collapseFraction.value = null
+                    _hudDismissed.value = false
+                }
             } catch (error: Exception) {
                 _voiceMessage.value = "История не сбросилась: ${error.message}"
             }
@@ -264,6 +387,10 @@ class AppState(
             is ChatStreamEvent.Delta -> _assistantTranscript.value = assistantBuffer.accept(event.text, false)
             is ChatStreamEvent.Done -> if (event.text.isNotBlank()) {
                 _assistantTranscript.value = assistantBuffer.accept(event.text, true)
+                _turnHistory.update { history ->
+                    (history + HudTurn(question = _userTranscript.value, answer = event.text))
+                        .takeLast(MAX_TURN_HISTORY)
+                }
             }
 
             is ChatStreamEvent.Tool -> appendToolLog(ToolLogEntry(event.name, event.status, event.durationMs))
@@ -469,5 +596,11 @@ class AppState(
 
         /** Запас на двухфазную анимацию сворачивания, после него лента чистится незаметно. */
         const val HUD_DISMISS_CLEAR_MS = 900L
+
+        /** Сколько прошлых ответов листается в HUD. Дальше — консоль и серверная история. */
+        const val MAX_TURN_HISTORY = 10
+
+        /** Период фонового обновления профиля: точность «х назад» в минутах, чаще незачем. */
+        const val PROFILE_REFRESH_MS = 5 * 60_000L
     }
 }

@@ -288,8 +288,8 @@ fun SectionColumns(content: @Composable RowScope.() -> Unit) {
 }
 
 @Composable
-fun HistoryActionIcon(color: Color = OverlayColors.Text) {
-    LucideIcon(HISTORY_GLYPH, color)
+fun HistoryActionIcon(color: Color = OverlayColors.Text, modifier: Modifier = Modifier.fillMaxSize()) {
+    LucideIcon(HISTORY_GLYPH, color, modifier)
 }
 
 @Composable

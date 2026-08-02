@@ -69,6 +69,45 @@ object ScreenPlacement {
 
     data class Anchors(val end: Boolean, val bottom: Boolean)
 
+    data class Capacity(val width: Float, val height: Float)
+
+    /**
+     * Сколько места есть у панели в направлении её раскрытия на текущем экране. На узком или
+     * HiDPI-мониторе это число может быть меньше глобального MAX — тогда HUD переносит текст,
+     * а не раскрывается за границу экрана. Минимальный размер сохраняем даже на совсем маленьком
+     * экране: пилюля всё равно остаётся видимой, а панель не получает невозможные constraints.
+     */
+    fun anchoredCapacity(
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float,
+        anchors: Anchors,
+        minimumWidth: Float,
+        minimumHeight: Float,
+        maximumWidth: Float,
+        maximumHeight: Float,
+    ): Capacity {
+        val screens = screensInDp()
+        val screen = screens.firstOrNull { it.contains(x + width / 2, y + height / 2) }
+            ?: screens.firstOrNull()
+            ?: return Capacity(maximumWidth, maximumHeight)
+        val availableWidth = if (anchors.end) {
+            x + width - screen.x
+        } else {
+            screen.x + screen.width - MARGIN_DP - x
+        }
+        val availableHeight = if (anchors.bottom) {
+            y + height - screen.y
+        } else {
+            screen.y + screen.height - MARGIN_DP - y
+        }
+        return Capacity(
+            width = availableWidth.coerceIn(minimumWidth, maximumWidth),
+            height = availableHeight.coerceIn(minimumHeight, maximumHeight),
+        )
+    }
+
     /** К каким краям экрана окно прижато: к тем же краям прижимается панель внутри кожуха. */
     fun anchors(x: Float, y: Float, width: Float, height: Float): Anchors {
         val screen = screensInDp().firstOrNull { it.contains(x + width / 2, y + height / 2) }
@@ -93,8 +132,12 @@ object ScreenPlacement {
      * уводило бы половину таблицы за границу.
      */
     fun clampToScreen(x: Float, y: Float, width: Float, height: Float): Placement {
-        val screen = screensInDp().firstOrNull { it.contains(x + 1, y + 1) }
-            ?: screensInDp().firstOrNull()
+        val screens = screensInDp()
+        // На стыке мониторов top-left и центр могут оказаться на разных экранах. Пользователь
+        // воспринимает окно по центру видимой панели; сначала сохраняем именно этот монитор.
+        val screen = screens.firstOrNull { it.contains(x + width / 2, y + height / 2) }
+            ?: screens.firstOrNull { it.contains(x + 1, y + 1) }
+            ?: screens.firstOrNull()
             ?: return Placement(x, y)
         val maxX = screen.x + screen.width - width - MARGIN_DP
         val maxY = screen.y + screen.height - height - MARGIN_DP

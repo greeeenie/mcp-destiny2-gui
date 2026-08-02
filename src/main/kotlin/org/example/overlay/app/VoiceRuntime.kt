@@ -1,5 +1,6 @@
 package org.example.overlay.app
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,16 +39,20 @@ class VoiceRuntime(
     private val settings: SettingsHolder,
     private val backend: BackendClient,
     private val tokenProvider: () -> String?,
+    private val onTurnStarted: () -> Unit,
     private val onUserText: (String) -> Unit,
     private val onEvent: (ChatStreamEvent) -> Unit,
     private val onMicLevel: (Float) -> Unit,
     private val onError: (String) -> Unit,
 ) {
     private val lifecycle = Mutex()
+    private val turns = VoiceTurnGeneration()
     private var parts: Parts? = null
     private val recorded = ByteArrayOutputStream()
 
     @Volatile private var recording = false
+    @Volatile private var recordingTurn = 0L
+    @Volatile private var turnJob: Job? = null
 
     private val _phase = MutableStateFlow(VoicePhase.IDLE)
     val phase: StateFlow<VoicePhase> = _phase.asStateFlow()
@@ -79,17 +84,31 @@ class VoiceRuntime(
         val hotkey = GlobalHotkey(keyCode = { settings.current.pttKeyCode }, scope = scope)
         hotkey.start(
             onDown = {
-                if (_phase.value == VoicePhase.IDLE || _phase.value == VoicePhase.ANSWERING) {
+                if (_ready.value && (_phase.value == VoicePhase.IDLE || _phase.value == VoicePhase.ANSWERING)) {
+                    val turn = turns.next()
+                    turnJob?.cancel()
+                    turnJob = null
                     synchronized(recorded) { recorded.reset() }
+                    recordingTurn = turn
                     recording = true
-                    _phase.value = VoicePhase.LISTENING
+                    if (!turns.runIfCurrent(turn) {
+                            _phase.value = VoicePhase.LISTENING
+                            // Старая лента убирается уже при нажатии PTT, а не после нескольких
+                            // секунд распознавания. LISTENING публикуем первым, чтобы очистка не
+                            // создала даже краткого Ready+empty между двумя ходами.
+                            onTurnStarted()
+                        }
+                    ) {
+                        recording = false
+                    }
                 }
             },
             onUp = {
                 if (recording) {
+                    val turn = recordingTurn
                     recording = false
                     onMicLevel(0f)
-                    finishTurn()
+                    finishTurn(turn)
                 }
             },
         )
@@ -100,12 +119,17 @@ class VoiceRuntime(
     }
 
     suspend fun stop() = lifecycle.withLock {
-        val active = parts ?: return
-        parts = null
         _ready.value = false
+        turns.invalidate()
+        turnJob?.cancel()
+        turnJob = null
+        recordingTurn = 0L
+        val active = parts
+        parts = null
         recording = false
-        active.hotkey.stop()
-        active.hub.stop()
+        active?.hotkey?.stop()
+        active?.hub?.stop()
+        onMicLevel(0f)
         _phase.value = VoicePhase.IDLE
     }
 
@@ -115,14 +139,14 @@ class VoiceRuntime(
         start()
     }
 
-    private fun finishTurn() {
+    private fun finishTurn(turn: Long) {
         val pcm = synchronized(recorded) { recorded.toByteArray().also { recorded.reset() } }
         if (pcm.size < MIN_RECORDING_BYTES) {
             // Клавишу задели: расшифровывать полсекунды тишины незачем, это лишний запрос.
-            _phase.value = VoicePhase.IDLE
+            turns.runIfCurrent(turn) { _phase.value = VoicePhase.IDLE }
             return
         }
-        _phase.value = VoicePhase.TRANSCRIBING
+        if (!turns.runIfCurrent(turn) { _phase.value = VoicePhase.TRANSCRIBING }) return
         turnJob?.cancel()
         turnJob = scope.launch {
             try {
@@ -133,23 +157,31 @@ class VoiceRuntime(
                     settings.current.sttModel ?: Settings.DEFAULT_STT_MODEL,
                     settings.current.sttLanguage,
                 )
+                if (!turns.isCurrent(turn)) return@launch
                 if (text.isBlank()) {
-                    _phase.value = VoicePhase.IDLE
+                    turns.runIfCurrent(turn) { _phase.value = VoicePhase.IDLE }
                     return@launch
                 }
-                onUserText(text)
-                _phase.value = VoicePhase.ANSWERING
-                backend.streamChat(token, text, settings.current.chatModel, onEvent)
+                if (!turns.runIfCurrent(turn) {
+                        onUserText(text)
+                        _phase.value = VoicePhase.ANSWERING
+                    }
+                ) return@launch
+                backend.streamChat(token, text, settings.current.chatModel) { event ->
+                    turns.runIfCurrent(turn) { onEvent(event) }
+                }
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Throwable) {
-                log.warn("Голосовой ход не удался", error)
-                onError(error.message ?: error.javaClass.simpleName)
+                turns.runIfCurrent(turn) {
+                    log.warn("Голосовой ход не удался", error)
+                    onError(error.message ?: error.javaClass.simpleName)
+                }
             } finally {
-                _phase.value = VoicePhase.IDLE
+                turns.runIfCurrent(turn) { _phase.value = VoicePhase.IDLE }
             }
         }
     }
-
-    private var turnJob: Job? = null
 
     private class Parts(
         val hub: MicrophoneHub,
@@ -167,5 +199,28 @@ class VoiceRuntime(
         /** Полминуты речи: дальше запрос на расшифровку становится неприлично большим. */
         const val MAX_RECORDING_BYTES = SAMPLE_RATE * 2 * 30
         val log = LoggerFactory.getLogger(VoiceRuntime::class.java)
+    }
+}
+
+/**
+ * Serializes voice-turn ownership so callbacks from a blocking, already cancelled request cannot
+ * cross the boundary into the next turn.
+ */
+internal class VoiceTurnGeneration {
+    private val monitor = Any()
+    private var current = 0L
+
+    fun next(): Long = synchronized(monitor) { ++current }
+
+    fun invalidate() {
+        next()
+    }
+
+    fun isCurrent(turn: Long): Boolean = synchronized(monitor) { turn == current }
+
+    fun runIfCurrent(turn: Long, action: () -> Unit): Boolean = synchronized(monitor) {
+        if (turn != current) return@synchronized false
+        action()
+        true
     }
 }

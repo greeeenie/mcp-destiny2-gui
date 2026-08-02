@@ -21,7 +21,13 @@ class SettingsStoreTest {
         val store = SettingsStore(file)
         val settings = Settings(
             baseUrl = "https://example.test/api",
-            hud = HudSettings(x = 120f, y = 40f, opacity = 0.55f),
+            hud = HudSettings(
+                x = 120f,
+                y = 40f,
+                anchorEnd = true,
+                anchorBottom = false,
+                opacity = 0.55f,
+            ),
             pttKeyCode = 0xA4,
             sttModel = "stt-test",
         )
