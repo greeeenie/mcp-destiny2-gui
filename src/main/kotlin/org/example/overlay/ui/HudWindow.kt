@@ -123,12 +123,19 @@ private fun panelShape(x: Float, y: Float, width: Float, height: Float): Rectang
 }
 
 /** Четыре координаты меняются одним snapshot — между ними не бывает промежуточного кадра. */
-private data class PanelGeometry(
+internal data class PanelGeometry(
     val x: Float,
     val y: Float,
     val width: Float,
     val height: Float,
 )
+
+/** Сворачивание всегда идёт через горизонтальную полосу исходной ширины. */
+internal fun collapseWaypoints(
+    start: PanelGeometry,
+    target: PanelGeometry,
+): Pair<PanelGeometry, PanelGeometry> =
+    PanelGeometry(start.x, target.y, start.width, target.height) to target
 
 private val PanelGeometryVectorConverter = TwoWayConverter<PanelGeometry, AnimationVector4D>(
     convertToVector = { geometry ->
@@ -576,7 +583,12 @@ fun HudWindow(state: AppState) {
                 }
         }
 
-        LaunchedEffect(expanded, targetWidth, targetHeight, anchors) {
+        LaunchedEffect(expanded, expansionRequested, targetWidth, targetHeight, anchors) {
+            // Во время debounce содержимое уже может исчезнуть, а expanded ещё остаётся true.
+            // Не запускаем обычный resize обеих осей: подтверждённое сворачивание само пройдёт
+            // через горизонтальную полосу и затем квадрат.
+            if (expanded && !expansionRequested) return@LaunchedEffect
+
             // Если уже развёрнутую панель перетащили к другому краю, следующий реальный рост
             // сначала уточняет доступное место. Drag не прерывается анимацией посреди жеста,
             // но новая строка ответа уже не уходит за границу экрана.
@@ -670,11 +682,9 @@ fun HudWindow(state: AppState) {
                 // затем ширина (слева направо при правом). Ось Y едет вместе с высотой,
                 // ось X — вместе с шириной, чтобы якорный край не дрожал.
                 feedRevealed = false
-                animatePanel(
-                    targetGeometry = PanelGeometry(start.x, target.y, start.width, target.height),
-                    durationMillis = COLLAPSE_PHASE_MS,
-                )
-                animatePanel(target, COLLAPSE_PHASE_MS)
+                val (stripTarget, pillTarget) = collapseWaypoints(start, target)
+                animatePanel(stripTarget, COLLAPSE_PHASE_MS)
+                animatePanel(pillTarget, COLLAPSE_PHASE_MS)
                 showPill = true
             }
 
