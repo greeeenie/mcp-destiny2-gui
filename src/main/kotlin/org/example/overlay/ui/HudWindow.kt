@@ -66,6 +66,7 @@ import kotlinx.coroutines.flow.debounce
 import org.example.overlay.app.AppState
 import org.example.overlay.app.OverlayStatus
 import org.example.overlay.app.ToolLogEntry
+import org.example.overlay.app.nextHudHistoryIndex
 import org.example.overlay.markdown.AnswerContent
 import org.example.overlay.markdown.MdBlock
 import org.example.overlay.platform.ScreenPlacement
@@ -152,7 +153,7 @@ private val HEADER_HEIGHT = 20.dp
 private val HEADER_BOTTOM_GAP = 10.dp
 
 /** Зазор между кнопками шапки: история и шестерёнка не должны читаться одной группой. */
-private val HEADER_BUTTON_GAP = 14.dp
+private val HEADER_BUTTON_GAP = 8.dp
 
 /** Поля панели. Вынесены в константу: на них же считается высота окна. */
 private val WINDOW_PADDING = 14.dp
@@ -349,9 +350,7 @@ fun HudWindow(state: AppState) {
     val historyPosition = turnHistoryIndex?.plus(1) ?: turnHistory.size
     val historyLabel = if (turnHistory.isEmpty()) null else "$historyPosition/${turnHistory.size}"
     val canGoBack = historyPosition > 1
-    val canGoForward = turnHistoryIndex?.let { index ->
-        index < turnHistory.lastIndex || assistantTranscript.isNotBlank()
-    } == true
+    val canGoForward = nextHudHistoryIndex(turnHistoryIndex, turnHistory.size) != turnHistoryIndex
 
     // «х назад» пересчитывается по тику: без него надпись застыла бы между ответами.
     var now by remember { mutableStateOf(Instant.now()) }
@@ -1039,9 +1038,11 @@ private fun WindowScope.HudHeader(
 
         // Прошлые ответы: стрелки со счётчиком, пока в истории есть что листать.
         historyLabel?.let { label ->
-            if (canGoBack) {
-                HeaderButton(chromeAlpha, onPreviousTurn) {
-                    ChevronIcon(OverlayColors.TextDim, pointsRight = false, Modifier.size(14.dp))
+            Box(modifier = Modifier.size(HEADER_HEIGHT), contentAlignment = Alignment.Center) {
+                if (canGoBack) {
+                    HeaderButton(chromeAlpha, onPreviousTurn) {
+                        ChevronIcon(OverlayColors.TextDim, pointsRight = false, Modifier.size(14.dp))
+                    }
                 }
             }
             Text(
@@ -1050,9 +1051,11 @@ private fun WindowScope.HudHeader(
                 fontSize = 10.sp,
                 modifier = Modifier.graphicsLayer { alpha = chromeAlpha },
             )
-            if (canGoForward) {
-                HeaderButton(chromeAlpha, onNextTurn) {
-                    ChevronIcon(OverlayColors.TextDim, pointsRight = true, Modifier.size(14.dp))
+            Box(modifier = Modifier.size(HEADER_HEIGHT), contentAlignment = Alignment.Center) {
+                if (canGoForward) {
+                    HeaderButton(chromeAlpha, onNextTurn) {
+                        ChevronIcon(OverlayColors.TextDim, pointsRight = true, Modifier.size(14.dp))
+                    }
                 }
             }
         }
@@ -1074,6 +1077,7 @@ private fun HeaderButton(chromeAlpha: Float, onClick: () -> Unit, content: @Comp
         modifier = Modifier
             .size(HEADER_HEIGHT)
             .graphicsLayer { alpha = chromeAlpha }
+            .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

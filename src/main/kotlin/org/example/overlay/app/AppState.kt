@@ -322,18 +322,9 @@ class AppState(
         }
     }
 
-    /**
-     * Вперёд по истории. С последнего хода уходим на живую ленту, если ей есть что показать,
-     * иначе остаёмся на нём: дальше свежего ответа истории не бывает.
-     */
+    /** Вперёд по истории. Последний сохранённый ход — конец списка. */
     fun showNextTurn() {
-        val current = _turnHistoryIndex.value ?: return
-        val last = _turnHistory.value.lastIndex
-        _turnHistoryIndex.value = when {
-            current < last -> current + 1
-            _assistantTranscript.value.isNotBlank() -> null
-            else -> current
-        }
+        _turnHistoryIndex.update { current -> nextHudHistoryIndex(current, _turnHistory.value.size) }
     }
 
 

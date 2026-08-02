@@ -23,6 +23,14 @@ class HudSizingTest {
     }
 
     @Test
+    fun `prose width is capped at 36 characters`() {
+        val capped = width("а".repeat(100))
+
+        assertEquals(width("а".repeat(36)), capped)
+        assertTrue(width("а".repeat(35)) < capped)
+    }
+
+    @Test
     fun `длинная проза не растягивается - она переносится`() {
         val long = "Нашёл сразу несколько подходящих мечей, ".repeat(10)
 

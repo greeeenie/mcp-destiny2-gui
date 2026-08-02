@@ -28,7 +28,7 @@ object HudSizing {
     private const val HORIZONTAL_CHROME = 44f
 
     /** Проза переносится, поэтому шире этого её строку не растягиваем. */
-    private const val PROSE_CHARS = 52
+    private const val PROSE_CHARS = 36
 
     /** Потолок на колонку — тот же, что в таблице рендера. */
     private const val MAX_COLUMN_CHARS = 28
