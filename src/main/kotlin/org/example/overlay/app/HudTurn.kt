@@ -8,3 +8,6 @@ data class HudTurn(
 
 internal fun nextHudHistoryIndex(current: Int?, historySize: Int): Int? =
     if (current != null && current < historySize - 1) current + 1 else current
+
+internal fun hudHistoryIndexForHover(current: Int?, last: Int?, hovered: Boolean): Int? =
+    if (hovered) current ?: last else current
