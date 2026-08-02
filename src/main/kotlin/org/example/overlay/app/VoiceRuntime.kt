@@ -93,9 +93,9 @@ class VoiceRuntime(
                     recording = true
                     if (!turns.runIfCurrent(turn) {
                             _phase.value = VoicePhase.LISTENING
-                            // Старая лента убирается уже при нажатии PTT, а не после нескольких
-                            // секунд распознавания. LISTENING публикуем первым, чтобы очистка не
-                            // создала даже краткого Ready+empty между двумя ходами.
+                            // LISTENING публикуем первым, чтобы сразу отменить сворачивание.
+                            // Старый ответ остаётся на экране во время записи и заменится только
+                            // после распознавания в onUserText.
                             onTurnStarted()
                         }
                     ) {

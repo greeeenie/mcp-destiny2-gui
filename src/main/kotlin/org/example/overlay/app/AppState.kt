@@ -51,7 +51,7 @@ class AppState(
         settings = settingsHolder,
         backend = backend,
         tokenProvider = { _session.value?.token },
-        onTurnStarted = ::prepareHudForNewTurn,
+        onTurnStarted = ::keepHudOpenForListening,
         onUserText = ::replaceHudFeedForNewTurn,
         onEvent = ::onChatEvent,
         onMicLevel = { level -> _micLevel.value = level },
@@ -277,10 +277,13 @@ class AppState(
 
     fun installUpdate() = updates.install()
 
-    /** Убрать с экрана прошедший ход. Только лента HUD: серверная история не трогается. */
-    private fun prepareHudForNewTurn() = synchronized(hudFeedLock) {
+    /**
+     * Новый PTT отменяет сворачивание, но не убирает предыдущий ответ во время записи.
+     * Лента заменится распознанной фразой в [replaceHudFeedForNewTurn], поэтому HUD не
+     * уменьшается под пальцем и у игрока остаётся контекст следующего вопроса.
+     */
+    private fun keepHudOpenForListening() = synchronized(hudFeedLock) {
         _hudFeedRevision.value += 1
-        clearHudFeedLocked()
         _collapseFraction.value = null
         _hudDismissed.value = false
     }
