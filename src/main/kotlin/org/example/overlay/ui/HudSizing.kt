@@ -31,7 +31,7 @@ object HudSizing {
     private const val PROSE_CHARS = 36
 
     /** Потолок на колонку — тот же, что в таблице рендера. */
-    private const val MAX_COLUMN_CHARS = 28
+    private const val MAX_COLUMN_CHARS = 20
 
     /** Разделители и отступы ячейки в символах. */
     private const val COLUMN_PADDING_CHARS = 3

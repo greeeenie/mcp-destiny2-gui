@@ -12,6 +12,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ScrollbarStyle
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -62,6 +65,7 @@ import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import org.example.overlay.app.AppState
 import org.example.overlay.app.OverlayStatus
@@ -164,6 +168,12 @@ private val HEADER_BUTTON_GAP = 8.dp
 
 /** Поля панели. Вынесены в константу: на них же считается высота окна. */
 private val WINDOW_PADDING = 14.dp
+
+/** Полоса относится к ответу и не заходит в шапку с запросом пользователя. */
+private val VERTICAL_SCROLLBAR_TOP_INSET = 88.dp
+
+/** Не показываем временное переполнение, пока окно подстраивается под потоковый ответ. */
+private const val SCROLLBAR_SHOW_DELAY_MS = 150L
 
 /** Скругление панели. Живёт на панели, а не на окне: окно вообще ничего не рисует. */
 private val PANEL_CORNER = 12.dp
@@ -906,15 +916,25 @@ private fun WindowScope.ExpandedHud(
     onMeasured: (Float) -> Unit,
 ) {
     val density = LocalDensity.current
+    val scrollState = rememberScrollState()
+    var showScrollbar by remember(scrollState) { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(WINDOW_PADDING)
+    LaunchedEffect(scrollState) {
+        snapshotFlow { scrollState.maxValue > 0 }.collectLatest { hasOverflow ->
+            if (hasOverflow) delay(SCROLLBAR_SHOW_DELAY_MS)
+            showScrollbar = hasOverflow
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(WINDOW_PADDING)
             // Прокрутка нужна не столько игроку, сколько замеру: она снимает с
             // содержимого потолок высоты. Заодно длинный ответ можно домотать.
-            .verticalScroll(rememberScrollState()),
-    ) {
+                .verticalScroll(scrollState),
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1005,6 +1025,30 @@ private fun WindowScope.ExpandedHud(
                     }
                 }
             }
+        }
+        }
+
+        if (showScrollbar) {
+            VerticalScrollbar(
+                adapter = rememberScrollbarAdapter(scrollState),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .padding(
+                        start = 0.dp,
+                        top = VERTICAL_SCROLLBAR_TOP_INSET,
+                        end = 4.dp,
+                        bottom = WINDOW_PADDING,
+                    ),
+                style = ScrollbarStyle(
+                    minimalHeight = 24.dp,
+                    thickness = 3.dp,
+                    shape = RoundedCornerShape(2.dp),
+                    hoverDurationMillis = 120,
+                    unhoverColor = OverlayColors.TextDim.copy(alpha = 0.35f),
+                    hoverColor = OverlayColors.Accent.copy(alpha = 0.85f),
+                ),
+            )
         }
     }
 }

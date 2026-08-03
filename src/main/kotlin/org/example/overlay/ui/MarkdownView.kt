@@ -1,9 +1,12 @@
 package org.example.overlay.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.HorizontalScrollbar
+import androidx.compose.foundation.ScrollbarStyle
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
@@ -20,6 +24,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -144,6 +149,8 @@ private fun TableView(table: MdBlock.Table, fontSize: TextUnit) {
     val columns = maxOf(table.header.size, table.rows.maxOfOrNull { it.size } ?: 0)
     if (columns == 0) return
     val weights = columnWeights(table, columns)
+    val scrollState = rememberScrollState()
+    val characterWidth = with(LocalDensity.current) { fontSize.toDp() } * TABLE_CHAR_WIDTH_RATIO
 
     Column(
         modifier = Modifier
@@ -151,15 +158,40 @@ private fun TableView(table: MdBlock.Table, fontSize: TextUnit) {
             .background(OverlayColors.Surface.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
             .padding(horizontal = 6.dp, vertical = 4.dp),
     ) {
-        if (table.header.isNotEmpty()) {
-            TableRow(table.header, columns, weights, table.alignments, fontSize, header = true)
-            HorizontalDivider(color = OverlayColors.TextDim.copy(alpha = 0.4f))
-        }
-        table.rows.forEachIndexed { index, row ->
-            TableRow(row, columns, weights, table.alignments, fontSize, header = false)
-            if (index != table.rows.lastIndex) {
-                HorizontalDivider(color = OverlayColors.Surface)
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val preferredWidth = characterWidth * weights.sum() + (columns * TABLE_CELL_PADDING_DP).dp
+            val contentWidth = maxOf(maxWidth, preferredWidth)
+
+            Box(modifier = Modifier.fillMaxWidth().horizontalScroll(scrollState)) {
+                Column(modifier = Modifier.width(contentWidth)) {
+                    if (table.header.isNotEmpty()) {
+                        TableRow(table.header, columns, weights, table.alignments, fontSize, header = true)
+                        HorizontalDivider(color = OverlayColors.TextDim.copy(alpha = 0.4f))
+                    }
+                    table.rows.forEachIndexed { index, row ->
+                        TableRow(row, columns, weights, table.alignments, fontSize, header = false)
+                        if (index != table.rows.lastIndex) {
+                            HorizontalDivider(color = OverlayColors.Surface)
+                        }
+                    }
+                }
             }
+        }
+
+        if (scrollState.maxValue > 0) {
+            Spacer(Modifier.height(4.dp))
+            HorizontalScrollbar(
+                adapter = rememberScrollbarAdapter(scrollState),
+                modifier = Modifier.fillMaxWidth().height(3.dp),
+                style = ScrollbarStyle(
+                    minimalHeight = 24.dp,
+                    thickness = 3.dp,
+                    shape = RoundedCornerShape(2.dp),
+                    hoverDurationMillis = 120,
+                    unhoverColor = OverlayColors.TextDim.copy(alpha = 0.35f),
+                    hoverColor = OverlayColors.Accent.copy(alpha = 0.85f),
+                ),
+            )
         }
     }
 }
@@ -204,7 +236,9 @@ private fun columnWeights(table: MdBlock.Table, columns: Int): List<Float> = Lis
 }
 
 private const val MIN_COLUMN_CHARS = 4
-private const val MAX_COLUMN_CHARS = 28
+private const val MAX_COLUMN_CHARS = 18
+private const val TABLE_CHAR_WIDTH_RATIO = 0.62f
+private const val TABLE_CELL_PADDING_DP = 8
 
 private fun headingSize(level: Int, base: TextUnit): TextUnit = when (level) {
     1 -> (base.value + 5).sp
