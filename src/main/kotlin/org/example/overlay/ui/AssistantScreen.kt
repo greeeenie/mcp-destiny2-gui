@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
+import org.example.overlay.backend.VoiceModelOption
 
 /** Модель ответа и её контекст отделены от распознавания речи. */
 @Composable
@@ -40,7 +41,7 @@ fun AssistantScreen(state: AppState) {
             if (available == null) {
                 Text("Получаю список моделей…", color = OverlayColors.TextDim, fontSize = 12.sp)
             } else {
-                ModelSelector(
+                ProviderModelSelector(
                     options = available.options,
                     default = available.default,
                     current = settings.chatModel,
@@ -58,4 +59,34 @@ fun AssistantScreen(state: AppState) {
             Text(it, color = OverlayColors.Warn, fontSize = 13.sp)
         }
     }
+}
+
+@Composable
+private fun ProviderModelSelector(
+    options: List<VoiceModelOption>,
+    default: String,
+    current: String?,
+    onSelect: (String?) -> Unit,
+) {
+    val selectedModel = current?.takeIf { id -> options.any { it.id == id } }
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        options.groupBy(VoiceModelOption::provider).forEach { (provider, providerOptions) ->
+            Column {
+                Text(provider.displayName(), color = OverlayColors.TextDim, fontSize = 11.sp)
+                Spacer(Modifier.height(8.dp))
+                ModelSelector(
+                    options = providerOptions,
+                    default = default,
+                    current = selectedModel,
+                    onSelect = onSelect,
+                )
+            }
+        }
+    }
+}
+
+private fun String.displayName(): String = when (this) {
+    "INWORLD" -> "INWORLD"
+    "OPEN_ROUTER" -> "OPENROUTER"
+    else -> replace('_', ' ').uppercase()
 }

@@ -196,7 +196,8 @@ internal fun ModelSelector(
  */
 @Composable
 internal fun WebSearchIndicator(models: VoiceModels, chatModel: String?) {
-    val selected = models.options.firstOrNull { it.id == (chatModel ?: models.default) }
+    val selectedId = chatModel?.takeIf { id -> models.options.any { it.id == id } } ?: models.default
+    val selected = models.options.firstOrNull { it.id == selectedId }
     if (selected?.webSearch == true) {
         Text("●  Веб-поиск включён", color = OverlayColors.Ok, fontSize = 11.sp)
     } else {

@@ -44,6 +44,8 @@ data class VoiceModelOption(
     val label: String,
     /** Умеет ли модель искать в интернете: сервер даёт поиск не всем. */
     val webSearch: Boolean = false,
+    /** Gateway модели ответа; значение по умолчанию сохраняет совместимость со старым сервером. */
+    val provider: String = "INWORLD",
 )
 
 /**
