@@ -46,6 +46,8 @@ data class VoiceModelOption(
     val webSearch: Boolean = false,
     /** Gateway модели ответа; значение по умолчанию сохраняет совместимость со старым сервером. */
     val provider: String = "INWORLD",
+    val inputPricePerMillion: Double? = null,
+    val outputPricePerMillion: Double? = null,
 )
 
 /**

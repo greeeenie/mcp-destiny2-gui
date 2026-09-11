@@ -185,9 +185,17 @@ internal fun ModelSelector(
                 text = option.label,
                 selected = selected,
                 onClick = { onSelect(option.id.takeIf { it != default }) },
+                supportingText = option.priceLabel(),
             )
         }
     }
+}
+
+private fun VoiceModelOption.priceLabel(): String? {
+    val input = inputPricePerMillion ?: return null
+    val output = outputPricePerMillion ?: return null
+    return "IN \$${"%.2f".format(java.util.Locale.US, input)} · " +
+        "OUT \$${"%.2f".format(java.util.Locale.US, output)} / 1M"
 }
 
 /**

@@ -11,6 +11,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,8 +52,6 @@ fun AssistantScreen(state: AppState) {
                 )
                 Spacer(Modifier.height(10.dp))
                 WebSearchIndicator(available, settings.chatModel)
-                Spacer(Modifier.height(6.dp))
-                ConsoleHint("Модель генерирует ответы ассистента и выбирает инструменты Destiny 2.")
             }
         }
 
@@ -69,19 +70,27 @@ private fun ProviderModelSelector(
     onSelect: (String?) -> Unit,
 ) {
     val selectedModel = current?.takeIf { id -> options.any { it.id == id } }
-    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        options.groupBy(VoiceModelOption::provider).forEach { (provider, providerOptions) ->
-            Column {
-                Text(provider.displayName(), color = OverlayColors.TextDim, fontSize = 11.sp)
-                Spacer(Modifier.height(8.dp))
-                ModelSelector(
-                    options = providerOptions,
-                    default = default,
-                    current = selectedModel,
-                    onSelect = onSelect,
+    val providers = options.map(VoiceModelOption::provider).distinct()
+    val selectedProvider = options.firstOrNull { it.id == (selectedModel ?: default) }?.provider
+        ?: providers.firstOrNull().orEmpty()
+    var activeProvider by remember(options, selectedModel, default) { mutableStateOf(selectedProvider) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            providers.forEach { provider ->
+                ConsoleChoice(
+                    text = provider.displayName(),
+                    selected = provider == activeProvider,
+                    onClick = { activeProvider = provider },
                 )
             }
         }
+        ModelSelector(
+            options = options.filter { it.provider == activeProvider },
+            default = default,
+            current = selectedModel,
+            onSelect = onSelect,
+        )
     }
 }
 

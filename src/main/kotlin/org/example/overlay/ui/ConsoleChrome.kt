@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -166,26 +167,32 @@ fun ConsoleChoice(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    supportingText: String? = null,
 ) {
     Row(
         modifier = modifier
-            .height(42.dp)
+            .height(if (supportingText == null) 42.dp else 56.dp)
             .background(if (selected) OverlayColors.ControlSelected else OverlayColors.Control)
             .border(1.dp, if (selected) OverlayColors.ControlBorderStrong else OverlayColors.ControlBorder)
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.width(3.dp).height(42.dp)
+            Modifier.width(3.dp).fillMaxHeight()
                 .background(if (selected) OverlayColors.Accent else Color.Transparent),
         )
-        Text(
-            text,
-            modifier = Modifier.padding(horizontal = 14.dp),
-            color = if (selected) OverlayColors.Text else OverlayColors.TextMuted,
-            fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-        )
+        Column(Modifier.padding(horizontal = 14.dp)) {
+            Text(
+                text,
+                color = if (selected) OverlayColors.Text else OverlayColors.TextMuted,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            )
+            supportingText?.let {
+                Spacer(Modifier.height(2.dp))
+                Text(it, color = OverlayColors.TextDim, fontSize = 10.sp)
+            }
+        }
     }
 }
 
