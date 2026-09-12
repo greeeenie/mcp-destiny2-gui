@@ -44,14 +44,14 @@ class SessionStore(private val file: Path) {
             MAPPER.readValue(json, StoredSession::class.java)
         } catch (error: Exception) {
             // Файл от другого пользователя, другой машины или просто битый — начинаем с логина.
-            log.warn("Не удалось прочитать сохранённую сессию: {}", error.toString())
+            log.warn("Could not read saved session: {}", error.toString())
             null
         }
     }
 
     fun save(session: StoredSession) {
         if (!Dpapi.isAvailable) {
-            log.warn("DPAPI недоступен — сессия не сохранена")
+            log.warn("DPAPI unavailable — session was not saved")
             return
         }
         try {
@@ -61,13 +61,13 @@ class SessionStore(private val file: Path) {
             Files.write(temp, encrypted)
             Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING)
         } catch (error: Exception) {
-            log.warn("Не удалось сохранить сессию: {}", error.toString())
+            log.warn("Could not save session: {}", error.toString())
         }
     }
 
     fun clear() {
         runCatching { Files.deleteIfExists(file) }
-            .onFailure { log.warn("Не удалось удалить {}: {}", file, it.toString()) }
+            .onFailure { log.warn("Could not delete {}: {}", file, it.toString()) }
     }
 
     private companion object {

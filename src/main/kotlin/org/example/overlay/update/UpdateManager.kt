@@ -72,7 +72,7 @@ class UpdateManager(
         val update = try {
             fetchLatest()
         } catch (error: Exception) {
-            log.info("Проверка обновлений не удалась: {}", error.toString())
+            log.info("Update check failed: {}", error.toString())
             return
         }
         if (update != null && Versions.isNewer(update.version, currentVersion)) {
@@ -87,7 +87,7 @@ class UpdateManager(
             .GET()
             .build()
         val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-        check(response.statusCode() in 200..299) { "GitHub ответил HTTP ${response.statusCode()}" }
+        check(response.statusCode() in 200..299) { "GitHub returned HTTP ${response.statusCode()}" }
         ReleaseFeed.parse(mapper.readTree(response.body()))
     }
 
@@ -106,7 +106,7 @@ class UpdateManager(
                 launchInstaller(msi)
                 _installStarted.value = true
             } catch (error: Exception) {
-                log.warn("Обновление не установилось", error)
+                log.warn("Update installation failed", error)
                 _state.value = UpdateState.Failed(update, error.message ?: error.javaClass.simpleName)
             }
         }
@@ -119,7 +119,7 @@ class UpdateManager(
             .GET()
             .build()
         val response = http.send(request, HttpResponse.BodyHandlers.ofInputStream())
-        check(response.statusCode() in 200..299) { "Загрузка не удалась: HTTP ${response.statusCode()}" }
+        check(response.statusCode() in 200..299) { "Download failed: HTTP ${response.statusCode()}" }
         var copied = 0L
         response.body().use { input ->
             Files.newOutputStream(target).use { output ->
@@ -138,7 +138,7 @@ class UpdateManager(
         }
         // Оборванная загрузка не должна доехать до msiexec: битый MSI — непонятная ошибка установки.
         check(update.sizeBytes <= 0 || copied == update.sizeBytes) {
-            "Файл скачался не целиком: $copied из ${update.sizeBytes} байт"
+            "Incomplete download: $copied of ${update.sizeBytes} bytes"
         }
         target
     }

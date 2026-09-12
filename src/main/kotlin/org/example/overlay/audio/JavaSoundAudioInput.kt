@@ -57,9 +57,9 @@ class JavaSoundAudioInput(
                 it.start()
             }
         } catch (error: LineUnavailableException) {
-            throw AudioDeviceException("Микрофон занят другим приложением", error)
+            throw AudioDeviceException("Microphone is being used by another application", error)
         } catch (error: RuntimeException) {
-            throw AudioDeviceException("Не удалось открыть микрофон", error)
+            throw AudioDeviceException("Could not open microphone", error)
         }
         line = openedLine
         captureJob = scope.launch(Dispatchers.IO) { capture(openedLine, setup) }
@@ -92,14 +92,14 @@ class JavaSoundAudioInput(
         val doubledInfo = DataLine.Info(TargetDataLine::class.java, doubled.toJavax())
         if (lineSupported(mixer, doubledInfo)) {
             log.info(
-                "Микрофон не умеет {} Гц — открываю {} Гц и децимирую вдвое",
+                "Microphone does not support {} Hz — opening {} Hz and downsampling by two",
                 format.sampleRate,
                 doubled.sampleRate,
             )
             return CaptureSetup(doubled, decimate = true)
         }
 
-        throw AudioDeviceException("Микрофон не поддерживает ${format.toJavax().describe()}")
+        throw AudioDeviceException("Microphone does not support ${format.toJavax().describe()}")
     }
 
     private suspend fun capture(activeLine: TargetDataLine, setup: CaptureSetup) {
@@ -110,19 +110,19 @@ class JavaSoundAudioInput(
                 var offset = 0
                 while (offset < chunk.size && currentCoroutineContext().isActive) {
                     val read = activeLine.read(chunk, offset, chunk.size - offset)
-                    if (read < 0) throw AudioDeviceException("Поток микрофона неожиданно закончился")
+                    if (read < 0) throw AudioDeviceException("Microphone stream ended unexpectedly")
                     if (read == 0) continue
                     offset += read
                 }
                 if (offset != chunk.size) continue
                 val payload = if (setup.decimate) Pcm16.decimateByTwo(chunk) else chunk
                 if (channel.trySend(payload).isFailure) {
-                    throw AudioDeviceException("Очередь микрофона переполнена")
+                    throw AudioDeviceException("Microphone queue overflow")
                 }
             }
         } catch (error: Throwable) {
             if (currentCoroutineContext().isActive) {
-                channel.close(error.asAudioFailure("Захват звука прервался"))
+                channel.close(error.asAudioFailure("Audio capture stopped unexpectedly"))
             }
         } finally {
             runCatching { activeLine.stop() }
@@ -145,7 +145,7 @@ class JavaSoundAudioInput(
 }
 
 internal fun AudioFormat.describe(): String =
-    "${sampleRate.toInt()} Гц, $sampleSizeInBits бит, $channels кан., " +
+    "${sampleRate.toInt()} Hz, $sampleSizeInBits bit, $channels ch, " +
         if (isBigEndian) "big-endian" else "little-endian"
 
 private fun isTargetLineSupported(mixer: Mixer.Info?, info: DataLine.Info): Boolean =

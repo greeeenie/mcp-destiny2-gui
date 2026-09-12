@@ -84,7 +84,7 @@ object RemoteIcons {
             if (bitmap != null) cache[url] = bitmap else failed += url
             bitmap
         } catch (error: Exception) {
-            log.debug("Иконка не загрузилась: {} ({})", url, error.toString())
+            log.debug("Icon failed to load: {} ({})", url, error.toString())
             failed += url
             null
         } finally {

@@ -20,7 +20,7 @@ class SettingsStore(private val file: Path) {
         return try {
             MAPPER.readValue(Files.readString(file), Settings::class.java)
         } catch (error: Exception) {
-            log.warn("Не удалось прочитать {}, беру настройки по умолчанию: {}", file, error.toString())
+            log.warn("Could not read {}, using defaults: {}", file, error.toString())
             Settings()
         }
     }
@@ -33,7 +33,7 @@ class SettingsStore(private val file: Path) {
             Files.writeString(temp, MAPPER.writeValueAsString(settings))
             Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING)
         } catch (error: Exception) {
-            log.warn("Не удалось сохранить {}: {}", file, error.toString())
+            log.warn("Could not save {}: {}", file, error.toString())
         }
     }
 

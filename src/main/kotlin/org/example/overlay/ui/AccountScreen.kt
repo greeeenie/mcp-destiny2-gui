@@ -43,7 +43,7 @@ fun AccountScreen(state: AppState) {
     val message by state.accountMessage.collectAsState()
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        ConsoleSection("Учётная запись") {
+        ConsoleSection("Account") {
             if (session == null) {
                 LoginForm(state, busy)
             } else {
@@ -71,7 +71,7 @@ private fun LoginForm(state: AppState, busy: Boolean) {
 
     Column {
         Text(
-            "Имя пользователя становится именем MCP-профиля: 5–20 символов, латиница, цифры, _ и -.",
+            "Your username becomes the MCP profile name: 5–20 Latin letters, digits, _ and -.",
             color = OverlayColors.TextDim,
             fontSize = 12.sp,
         )
@@ -80,7 +80,7 @@ private fun LoginForm(state: AppState, busy: Boolean) {
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
-            label = { Text("Имя пользователя") },
+            label = { Text("Username") },
             singleLine = true,
             modifier = Modifier.width(320.dp),
         )
@@ -88,7 +88,7 @@ private fun LoginForm(state: AppState, busy: Boolean) {
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Пароль") },
+            label = { Text("Password") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.width(320.dp),
@@ -97,7 +97,7 @@ private fun LoginForm(state: AppState, busy: Boolean) {
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = rememberPassword, onCheckedChange = { rememberPassword = it })
-            Text("Запомнить пароль", color = OverlayColors.TextDim, fontSize = 13.sp)
+            Text("Remember password", color = OverlayColors.TextDim, fontSize = 13.sp)
         }
 
         Spacer(Modifier.height(12.dp))
@@ -107,14 +107,14 @@ private fun LoginForm(state: AppState, busy: Boolean) {
                 enabled = !busy && username.isNotBlank() && password.isNotBlank(),
                 shape = RectangleShape,
             ) {
-                Text("Войти")
+                Text("Sign in")
             }
             OutlinedButton(
                 onClick = { state.register(username.trim(), password, rememberPassword) },
                 enabled = !busy && username.isNotBlank() && password.isNotBlank(),
                 shape = RectangleShape,
             ) {
-                Text("Зарегистрироваться")
+                Text("Register")
             }
         }
     }
@@ -127,15 +127,15 @@ private fun ProfileCard(state: AppState) {
     val current = session ?: return
 
     Column {
-        InfoRow("Пользователь", current.username)
+        InfoRow("User", current.username)
 
         val linked = profile?.bungieLinked
         InfoRow(
             label = "Bungie",
             value = when (linked) {
-                true -> "привязан"
-                false -> "не привязан"
-                null -> "неизвестно"
+                true -> "linked"
+                false -> "not linked"
+                null -> "unknown"
             },
             valueColor = when (linked) {
                 true -> OverlayColors.Ok
@@ -147,7 +147,7 @@ private fun ProfileCard(state: AppState) {
             trailing = if (linked == true) {
                 {
                     Text(
-                        "отвязать",
+                        "unlink",
                         color = OverlayColors.TextDim,
                         fontSize = 13.sp,
                         textDecoration = TextDecoration.Underline,
@@ -158,15 +158,15 @@ private fun ProfileCard(state: AppState) {
                 null
             },
         )
-        profile?.bungieProfile?.displayName?.let { InfoRow("Имя Bungie", it) }
+        profile?.bungieProfile?.displayName?.let { InfoRow("Bungie name", it) }
 
         // Свежесть данных: ассистент отвечает по последнему слепку инвентаря, и игроку видно,
         // насколько тот отстал от игры.
         if (linked == true) {
             val syncedAt = profile?.bungieProfile?.inventorySyncedAt
             InfoRow(
-                label = "Синхронизация",
-                value = syncedAt?.let(::formatSyncedAt) ?: "ещё не выполнялась",
+                label = "Sync",
+                value = syncedAt?.let(::formatSyncedAt) ?: "not synced yet",
                 valueColor = if (syncedAt != null) OverlayColors.Text else OverlayColors.TextDim,
             )
         }
@@ -174,24 +174,24 @@ private fun ProfileCard(state: AppState) {
         if (linked == false) {
             Spacer(Modifier.height(8.dp))
             Text(
-                "Пока аккаунт не привязан, любой инструмент кроме authorize вернёт ошибку.",
+                "Until the account is linked, every tool except authorize will return an error.",
                 color = OverlayColors.Warn,
                 fontSize = 12.sp,
             )
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { state.linkBungie() }, shape = RectangleShape) { Text("Привязать Bungie") }
+            Button(onClick = { state.linkBungie() }, shape = RectangleShape) { Text("Link Bungie") }
         }
 
         val authUrl by state.authUrl.collectAsState()
         val polling by state.authPolling.collectAsState()
         if (authUrl != null) {
             Spacer(Modifier.height(12.dp))
-            Text("Открой ссылку и вернись — привязка подтянется сама.", color = OverlayColors.Warn, fontSize = 13.sp)
+            Text("Open the link and return — the connection will update automatically.", color = OverlayColors.Warn, fontSize = 13.sp)
             Text(authUrl.orEmpty(), color = OverlayColors.TextDim, fontSize = 11.sp)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = { state.openAuthorizationLink() }, shape = RectangleShape) {
-                    Text("Открыть в браузере")
+                    Text("Open in browser")
                 }
                 // Опрос профиля живёт 5 минут; дальше проверяем по кнопке.
                 OutlinedButton(
@@ -199,22 +199,22 @@ private fun ProfileCard(state: AppState) {
                     enabled = !polling,
                     shape = RectangleShape,
                 ) {
-                    Text(if (polling) "Проверяю…" else "Проверить ещё раз")
+                    Text(if (polling) "Checking…" else "Check again")
                 }
                 OutlinedButton(onClick = { state.dismissAuthorizationPrompt() }, shape = RectangleShape) {
-                    Text("Скрыть")
+                    Text("Hide")
                 }
             }
         }
         if (current.isExpiringSoon()) {
             Spacer(Modifier.height(8.dp))
-            Text("Сессия скоро истечёт — лучше войти заново заранее.", color = OverlayColors.Warn, fontSize = 12.sp)
+            Text("Your session expires soon — sign in again before it does.", color = OverlayColors.Warn, fontSize = 12.sp)
         }
 
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { state.refreshAccount() }, shape = RectangleShape) { Text("Обновить") }
-            OutlinedButton(onClick = { state.logout() }, shape = RectangleShape) { Text("Выйти") }
+            OutlinedButton(onClick = { state.refreshAccount() }, shape = RectangleShape) { Text("Refresh") }
+            OutlinedButton(onClick = { state.logout() }, shape = RectangleShape) { Text("Sign out") }
         }
     }
 }
@@ -225,10 +225,10 @@ private fun formatSyncedAt(iso: String): String = runCatching {
     val instant = Instant.parse(iso)
     val minutes = Duration.between(instant, Instant.now()).toMinutes()
     val relative = when {
-        minutes < 1 -> "только что"
-        minutes < 60 -> "$minutes мин назад"
-        minutes < 60 * 24 -> "${minutes / 60} ч назад"
-        else -> "${minutes / (60 * 24)} дн назад"
+        minutes < 1 -> "just now"
+        minutes < 60 -> "$minutes min ago"
+        minutes < 60 * 24 -> "${minutes / 60} h ago"
+        else -> "${minutes / (60 * 24)} d ago"
     }
     val local = DateTimeFormatter.ofPattern("dd.MM HH:mm")
         .format(instant.atZone(ZoneId.systemDefault()))

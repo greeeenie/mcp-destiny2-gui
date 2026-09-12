@@ -68,7 +68,7 @@ fun ConsolePage(
                 modifier = Modifier.align(Alignment.CenterStart).padding(horizontal = 36.dp),
             ) {
                 Text(
-                    "НАСТРОЙКИ",
+                    "SETTINGS",
                     color = OverlayColors.TextDim,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,

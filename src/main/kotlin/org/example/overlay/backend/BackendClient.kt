@@ -39,8 +39,8 @@ open class BackendException(
 class UnauthorizedException(message: String, statusCode: Int = 401) : BackendException(statusCode, message)
 
 /**
- * Клиент `mcp-destiny2-client` на `java.net.http`: лишних зависимостей нет (§7). С Inworld
- * оверлей не разговаривает вовсе — ключ и весь голосовой тракт живут на сервере (риск 10).
+ * Клиент `mcp-destiny2-client` на `java.net.http`: лишних зависимостей нет (§7).
+ * BYOK-ключ уходит только серверу в заголовке конкретного чат-запроса.
  *
  * Запросы блокирующие и уходят на `Dispatchers.IO`: асинхронный API `HttpClient` здесь ничего
  * не даёт, а читать код проще.
@@ -122,13 +122,21 @@ class BackendClient(
      * инструмент, `done` — ответ целиком, `error` — сорвалось. Читаем построчно и отдаём наружу
      * по мере поступления, поэтому текст появляется в HUD, пока модель ещё пишет.
      */
-    suspend fun streamChat(token: String, text: String, model: String?, onEvent: (ChatStreamEvent) -> Unit) {
+    suspend fun streamChat(
+        token: String,
+        text: String,
+        model: String?,
+        providerApiKey: String,
+        onEvent: (ChatStreamEvent) -> Unit,
+    ) {
+        require(providerApiKey.isNotBlank()) { "Enter the selected provider API key" }
         val body = mapper.writeValueAsString(
             mapper.createObjectNode().put("text", text).apply { model?.let { put("model", it) } },
         )
         val request = request("/voice/chat", token, CHAT_TIMEOUT)
             .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream")
+            .header(PROVIDER_API_KEY_HEADER, providerApiKey)
             .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
             .build()
 
@@ -136,14 +144,14 @@ class BackendClient(
             val response = try {
                 http.send(request, HttpResponse.BodyHandlers.ofInputStream())
             } catch (error: IOException) {
-                throw BackendException(0, "Бэкенд недоступен: ${error.message ?: error.javaClass.simpleName}", error)
+                throw BackendException(0, "Backend unavailable: ${error.message ?: error.javaClass.simpleName}", error)
             }
             response.body().use { input ->
                 if (response.statusCode() == 401 || response.statusCode() == 403) {
-                    throw UnauthorizedException("Сессия недействительна", response.statusCode())
+                    throw UnauthorizedException("Session is no longer valid", response.statusCode())
                 }
                 if (response.statusCode() !in 200..299) {
-                    throw BackendException(response.statusCode(), "Бэкенд ответил HTTP ${response.statusCode()}")
+                    throw BackendException(response.statusCode(), "Backend returned HTTP ${response.statusCode()}")
                 }
                 var eventName = "message"
                 input.bufferedReader(StandardCharsets.UTF_8).forEachLine { line ->
@@ -173,7 +181,7 @@ class BackendClient(
                 durationMs = node?.path("durationMs")?.asLong() ?: 0L,
             )
 
-            else -> ChatStreamEvent.Failed(node?.path("message")?.asString()?.ifBlank { null } ?: "Ход не удался")
+            else -> ChatStreamEvent.Failed(node?.path("message")?.asString()?.ifBlank { null } ?: "Turn failed")
         }
     }
 
@@ -211,16 +219,16 @@ class BackendClient(
         try {
             http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
         } catch (error: IOException) {
-            throw BackendException(0, "Бэкенд недоступен: ${error.message ?: error.javaClass.simpleName}", error)
+            throw BackendException(0, "Backend unavailable: ${error.message ?: error.javaClass.simpleName}", error)
         } catch (error: InterruptedException) {
             Thread.currentThread().interrupt()
-            throw BackendException(0, "Запрос к бэкенду прерван", error)
+            throw BackendException(0, "Backend request was interrupted", error)
         }
     }
 
     private fun HttpResponse<String>.requireSuccess(): HttpResponse<String> {
         if (statusCode() in 200..299) return this
-        val message = errorMessage(body()) ?: "Бэкенд ответил HTTP ${statusCode()}"
+        val message = errorMessage(body()) ?: "Backend returned HTTP ${statusCode()}"
         if (statusCode() == 401 || statusCode() == 403) throw UnauthorizedException(message, statusCode())
         throw BackendException(statusCode(), message)
     }
@@ -234,7 +242,7 @@ class BackendClient(
     private fun <T> HttpResponse<String>.parse(type: Class<T>): T = try {
         mapper.readValue(body(), type)
     } catch (error: Exception) {
-        throw BackendException(statusCode(), "Не разобрать ответ бэкенда: ${error.message}", error)
+        throw BackendException(statusCode(), "Could not parse backend response: ${error.message}", error)
     }
 
     companion object {
@@ -246,6 +254,7 @@ class BackendClient(
 
         /** Ход с инструментами живёт дольше обычного запроса: ждём весь поток. */
         private val CHAT_TIMEOUT: Duration = Duration.ofMinutes(2)
+        private const val PROVIDER_API_KEY_HEADER = "X-Provider-Api-Key"
 
         val MAPPER: JsonMapper = JsonMapper.builder()
             .addModule(kotlinModule())

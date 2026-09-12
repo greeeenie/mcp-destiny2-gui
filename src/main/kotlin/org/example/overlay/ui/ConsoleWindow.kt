@@ -70,7 +70,7 @@ fun ConsoleWindow(state: AppState, onClose: () -> Unit) {
 
     Window(
         onCloseRequest = onClose,
-        title = "Destiny 2 Assistant — консоль",
+        title = "Destiny 2 Assistant — Console",
         icon = painterResource("icons/app-icon.png"),
         state = windowState,
         undecorated = true,
@@ -223,19 +223,19 @@ private fun UpdateBanner(state: UpdateState, onInstall: () -> Unit) {
         when (state) {
             is UpdateState.Available -> {
                 Text(
-                    "Доступно обновление ${state.update.version} — у тебя ${AppVersion.current}",
+                    "Update ${state.update.version} is available — you have ${AppVersion.current}",
                     color = OverlayColors.Text,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onInstall) {
-                    Text("Установить и перезапустить", color = OverlayColors.Accent, fontSize = 13.sp)
+                    Text("Install and restart", color = OverlayColors.Accent, fontSize = 13.sp)
                 }
             }
 
             is UpdateState.Downloading -> {
-                Text("Скачиваю ${state.update.version}…", color = OverlayColors.Text, fontSize = 13.sp)
+                Text("Downloading ${state.update.version}…", color = OverlayColors.Text, fontSize = 13.sp)
                 Spacer(Modifier.width(12.dp))
                 LinearProgressIndicator(
                     progress = { state.progress },
@@ -246,20 +246,20 @@ private fun UpdateBanner(state: UpdateState, onInstall: () -> Unit) {
             }
 
             is UpdateState.Installing -> Text(
-                "Установщик запущен — приложение закроется и перезапустится само после обновления.",
+                "Installer started — the app will close and restart after the update.",
                 color = OverlayColors.Ok,
                 fontSize = 13.sp,
             )
 
             is UpdateState.Failed -> {
                 Text(
-                    "Обновление не установилось: ${state.message}",
+                    "Update failed: ${state.message}",
                     color = OverlayColors.Error,
                     fontSize = 13.sp,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onInstall) {
-                    Text("Повторить", color = OverlayColors.Accent, fontSize = 13.sp)
+                    Text("Retry", color = OverlayColors.Accent, fontSize = 13.sp)
                 }
             }
 
@@ -276,9 +276,9 @@ private fun UpdateBanner(state: UpdateState, onInstall: () -> Unit) {
 private fun HudSettingsScreen(state: AppState) {
     val settings by state.settings.collectAsState()
 
-    ConsoleSection("Внешний вид HUD") {
+    ConsoleSection("HUD appearance") {
         HudSliderRow(
-            label = "Прозрачность",
+            label = "Opacity",
             valueText = "${(settings.hud.opacity * 100).roundToInt()} %",
         ) {
             ConsoleSlider(
@@ -293,8 +293,8 @@ private fun HudSettingsScreen(state: AppState) {
         Spacer(Modifier.height(18.dp))
 
         HudSliderRow(
-            label = "Свернуть после ответа",
-            valueText = "${settings.hud.collapseSeconds} с",
+            label = "Collapse after response",
+            valueText = "${settings.hud.collapseSeconds} s",
         ) {
             ConsoleSlider(
                 value = settings.hud.collapseSeconds.toFloat(),
@@ -331,9 +331,9 @@ private fun HudSliderRow(
 }
 
 private enum class ConsoleTab(val label: String, val pageTitle: String, val markAsset: String) {
-    Profile("Профиль", "Профиль", "icons/page-mark-profile.png"),
-    Assistant("Ассистент", "Ассистент", "icons/page-mark-assistant.png"),
-    Voice("Голос", "Голос", "icons/page-mark-voice.png"),
+    Profile("Profile", "Profile", "icons/page-mark-profile.png"),
+    Assistant("Assistant", "Assistant", "icons/page-mark-assistant.png"),
+    Voice("Voice", "Voice", "icons/page-mark-voice.png"),
     Hud("HUD", "HUD", "icons/page-mark-hud.png"),
 }
 

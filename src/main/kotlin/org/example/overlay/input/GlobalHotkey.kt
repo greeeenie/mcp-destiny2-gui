@@ -21,8 +21,9 @@ import org.slf4j.LoggerFactory
  * без хуков, без инъекций, без синтеза ввода в игру. Ниже профиля не бывает.
  */
 class GlobalHotkey(
-    private val keyCode: () -> Int,
+    private val keyCodes: () -> List<Int>,
     private val scope: CoroutineScope,
+    private val enabled: () -> Boolean = { true },
     private val pollIntervalMs: Long = DEFAULT_POLL_INTERVAL_MS,
     private val isKeyDown: (Int) -> Boolean = ::isPhysicalKeyDown,
 ) {
@@ -31,13 +32,15 @@ class GlobalHotkey(
     fun start(onDown: suspend () -> Unit, onUp: suspend () -> Unit) {
         if (job != null) return
         if (!Platform.isWindows()) {
-            log.warn("Не Windows — горячая клавиша недоступна")
+            log.warn("Global shortcut is unavailable outside Windows")
             return
         }
         job = scope.launch(Dispatchers.IO) {
             var pressed = false
             while (isActive) {
-                val down = runCatching { isKeyDown(keyCode()) }.getOrDefault(false)
+                val down = runCatching {
+                    enabled() && keyCodes().let { keys -> keys.isNotEmpty() && keys.all(isKeyDown) }
+                }.getOrDefault(false)
                 if (down != pressed) {
                     pressed = down
                     if (down) onDown() else onUp()
@@ -61,7 +64,7 @@ class GlobalHotkey(
 }
 
 /** Старший бит — «клавиша нажата прямо сейчас». */
-private fun isPhysicalKeyDown(virtualKeyCode: Int): Boolean =
+internal fun isPhysicalKeyDown(virtualKeyCode: Int): Boolean =
     (User32Keys.INSTANCE.GetAsyncKeyState(virtualKeyCode).toInt() and 0x8000) != 0
 
 /** Собственный минимальный биндинг: не зависим от того, что именно объявлено в JNA User32. */
@@ -75,23 +78,62 @@ private interface User32Keys : StdCallLibrary {
 
 /** Коды клавиш, которые имеет смысл предлагать в настройках. */
 object VirtualKeys {
+    private const val MOUSE_BUTTON_4 = 0x05
+    private const val MOUSE_BUTTON_5 = 0x06
+    private const val BACKSPACE = 0x08
+    private const val TAB = 0x09
+    private const val ENTER = 0x0D
+    private const val CAPS_LOCK = 0x14
+    private const val ESCAPE = 0x1B
+    private const val SPACE = 0x20
+    private const val PAGE_UP = 0x21
+    private const val PAGE_DOWN = 0x22
+    private const val END = 0x23
+    private const val HOME = 0x24
+    private const val LEFT = 0x25
+    private const val UP = 0x26
+    private const val RIGHT = 0x27
+    private const val DOWN = 0x28
+    private const val INSERT = 0x2D
+    private const val DELETE = 0x2E
+    private const val LEFT_SHIFT = 0xA0
+    private const val RIGHT_SHIFT = 0xA1
+    private const val LEFT_CONTROL = 0xA2
     const val RIGHT_ALT = 0xA5
-    const val LEFT_ALT = 0xA4
-    const val RIGHT_CONTROL = 0xA3
-    const val CAPS_LOCK = 0x14
-    const val F13 = 0x7C
-    const val MOUSE_BUTTON_4 = 0x05
-    const val MOUSE_BUTTON_5 = 0x06
+    private const val LEFT_ALT = 0xA4
+    private const val RIGHT_CONTROL = 0xA3
 
-    val NAMES: Map<Int, String> = linkedMapOf(
-        RIGHT_ALT to "Right Alt",
-        LEFT_ALT to "Left Alt",
-        RIGHT_CONTROL to "Right Ctrl",
-        CAPS_LOCK to "Caps Lock",
-        F13 to "F13",
-        MOUSE_BUTTON_4 to "Мышь X1",
-        MOUSE_BUTTON_5 to "Мышь X2",
+    private val SPECIAL_NAMES: Map<Int, String> = mapOf(
+        MOUSE_BUTTON_4 to "Mouse X1", MOUSE_BUTTON_5 to "Mouse X2",
+        BACKSPACE to "Backspace", TAB to "Tab", ENTER to "Enter", CAPS_LOCK to "Caps Lock",
+        ESCAPE to "Esc", SPACE to "Space", PAGE_UP to "Page Up", PAGE_DOWN to "Page Down",
+        END to "End", HOME to "Home", LEFT to "Left", UP to "Up", RIGHT to "Right", DOWN to "Down",
+        INSERT to "Insert", DELETE to "Delete",
+        LEFT_SHIFT to "Left Shift", RIGHT_SHIFT to "Right Shift",
+        LEFT_CONTROL to "Left Ctrl", RIGHT_CONTROL to "Right Ctrl",
+        LEFT_ALT to "Left Alt", RIGHT_ALT to "Right Alt",
     )
 
-    fun name(code: Int): String = NAMES[code] ?: "0x%02X".format(code)
+    val RECORDABLE_CODES: List<Int> = buildList {
+        addAll(SPECIAL_NAMES.keys)
+        addAll(0x30..0x39)
+        addAll(0x41..0x5A)
+        addAll(0x60..0x69)
+        addAll(0x70..0x87)
+    }.distinct()
+
+    fun normalize(codes: List<Int>): List<Int> = codes.distinct().sortedWith(
+        compareBy<Int> { if (it in MODIFIERS) 0 else 1 }.thenBy { RECORDABLE_CODES.indexOf(it) },
+    )
+
+    fun name(code: Int): String = SPECIAL_NAMES[code] ?: when (code) {
+        in 0x30..0x39, in 0x41..0x5A -> code.toChar().toString()
+        in 0x60..0x69 -> "Numpad ${code - 0x60}"
+        in 0x70..0x87 -> "F${code - 0x6F}"
+        else -> "0x%02X".format(code)
+    }
+
+    fun combinationName(codes: List<Int>): String = normalize(codes).joinToString(" + ", transform = ::name)
+
+    private val MODIFIERS = setOf(LEFT_SHIFT, RIGHT_SHIFT, LEFT_CONTROL, RIGHT_CONTROL, LEFT_ALT, RIGHT_ALT)
 }

@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.example.overlay.backend.AuthorizationLink
 import org.example.overlay.backend.BackendClient
+import org.example.overlay.backend.ProviderApiKeyStore
+import org.example.overlay.backend.ProviderApiKeys
 import org.example.overlay.backend.BackendException
 import org.example.overlay.backend.ChatStreamEvent
 import org.example.overlay.backend.Profile
@@ -36,11 +38,17 @@ import java.time.temporal.ChronoUnit
 class AppState(
     private val settingsHolder: SettingsHolder,
     private val sessionStore: SessionStore,
+    private val providerApiKeyStore: ProviderApiKeyStore,
     private val backend: BackendClient,
     private val updates: UpdateManager,
     private val scope: CoroutineScope,
 ) {
     val settings: StateFlow<Settings> = settingsHolder.settings
+
+    private val _providerApiKeys = MutableStateFlow(providerApiKeyStore.load())
+    val providerApiKeys: StateFlow<ProviderApiKeys> = _providerApiKeys.asStateFlow()
+
+    private val _hotkeyCaptureActive = MutableStateFlow(false)
 
     /**
      * Голос всегда наготове: микрофон и клавиша поднимаются вместе с приложением, соединения
@@ -51,6 +59,8 @@ class AppState(
         settings = settingsHolder,
         backend = backend,
         tokenProvider = { _session.value?.token },
+        providerApiKey = ::providerApiKey,
+        hotkeyEnabled = { !_hotkeyCaptureActive.value },
         onTurnStarted = ::keepHudOpenForListening,
         onUserText = ::replaceHudFeedForNewTurn,
         onEvent = ::onChatEvent,
@@ -172,7 +182,7 @@ class AppState(
             delay(PROFILE_REFRESH_MS)
             val token = _session.value?.token ?: continue
             runCatching { _profile.value = backend.profile(token) }
-                .onFailure { error -> log.debug("Фоновое обновление профиля не удалось: {}", error.toString()) }
+                .onFailure { error -> log.debug("Background profile refresh failed: {}", error.toString()) }
         }
     }
 
@@ -335,8 +345,8 @@ class AppState(
             } catch (error: Throwable) {
                 // Именно Throwable: Error иначе убивает корутину молча, и тракт выглядит
                 // сломанным без единого слова в интерфейсе.
-                log.error("Не удалось поднять голосовой тракт", error)
-                _voiceMessage.value = "${error.javaClass.simpleName}: ${error.message ?: "без описания"}"
+                log.error("Could not start voice pipeline", error)
+                _voiceMessage.value = "${error.javaClass.simpleName}: ${error.message ?: "no details"}"
             }
         }
     }
@@ -346,7 +356,7 @@ class AppState(
         scope.launch {
             _voiceMessage.value = null
             runCatching { voice.restart() }
-                .onFailure { error -> _voiceMessage.value = "Звук не поднялся: ${error.message}" }
+                .onFailure { error -> _voiceMessage.value = "Audio failed to start: ${error.message}" }
         }
     }
 
@@ -367,7 +377,7 @@ class AppState(
                     _hudDismissed.value = false
                 }
             } catch (error: Exception) {
-                _voiceMessage.value = "История не сбросилась: ${error.message}"
+                _voiceMessage.value = "Could not clear history: ${error.message}"
             }
         }
     }
@@ -400,6 +410,16 @@ class AppState(
 
     fun updateSettings(transform: (Settings) -> Settings) = settingsHolder.update(transform)
 
+    fun updateProviderApiKey(provider: String, apiKey: String) {
+        val updated = _providerApiKeys.value.withProvider(provider, apiKey.trim())
+        _providerApiKeys.value = updated
+        providerApiKeyStore.save(updated)
+    }
+
+    fun setHotkeyCaptureActive(active: Boolean) {
+        _hotkeyCaptureActive.value = active
+    }
+
     fun setStatus(status: OverlayStatus) {
         _status.value = status
     }
@@ -421,6 +441,13 @@ class AppState(
     fun toggleConsole() = _consoleVisible.update { !it }
 
     fun flushSettings() = settingsHolder.flush()
+
+    private fun providerApiKey(modelId: String?): String? {
+        val models = _chatModels.value ?: return null
+        val selectedId = modelId?.takeIf { id -> models.options.any { it.id == id } } ?: models.default
+        val provider = models.options.firstOrNull { it.id == selectedId }?.provider ?: return null
+        return _providerApiKeys.value.forProvider(provider).takeIf(String::isNotBlank)
+    }
 
     // --- аккаунт ---
 
@@ -448,7 +475,7 @@ class AppState(
         _profile.value = backend.profile(token)
         // Список моделей — украшение, а не условие: без него голос работает на серверном дефолте.
         _chatModels.value = runCatching { backend.voiceModels(token) }
-            .onFailure { error -> log.warn("Список моделей не загрузился: {}", error.toString()) }
+            .onFailure { error -> log.warn("Could not load model list: {}", error.toString()) }
             .getOrNull()
     }
 
@@ -461,7 +488,7 @@ class AppState(
         appendToolLog(ToolLogEntry(AuthorizationLink.TOOL_NAME, result.status, 0))
         val url = AuthorizationLink.extract(ToolResult(result.status, result.output, result.message))
         if (url == null) {
-            _accountMessage.value = result.message ?: "Бэкенд не вернул ссылку авторизации"
+            _accountMessage.value = result.message ?: "Backend did not return an authorization link"
         } else {
             showAuthorizationPrompt(url)
         }
@@ -537,7 +564,7 @@ class AppState(
         val stored = sessionStore.load() ?: return
         if (stored.isExpired()) {
             sessionStore.clear()
-            _accountMessage.value = "Сессия истекла — войди заново"
+            _accountMessage.value = "Session expired — sign in again"
             return
         }
         _session.value = stored
@@ -545,12 +572,12 @@ class AppState(
     }
 
     private fun requireToken(): String =
-        _session.value?.token ?: throw BackendException(401, "Сначала нужно войти")
+        _session.value?.token ?: throw BackendException(401, "Sign in first")
 
     private fun parseExpiry(raw: String): Long = try {
         Instant.parse(raw).epochSecond
     } catch (error: Exception) {
-        log.warn("Не разобрать expiresAt '{}': {}. Считаю срок 12 часов от сейчас.", raw, error.toString())
+        log.warn("Could not parse expiresAt '{}': {}. Assuming 12 hours from now.", raw, error.toString())
         Instant.now().plus(12, ChronoUnit.HOURS).epochSecond
     }
 
@@ -563,11 +590,11 @@ class AppState(
             } catch (error: UnauthorizedException) {
                 // Refresh-ручки нет: единственная честная реакция — вернуть игрока на логин (§4).
                 logout()
-                _accountMessage.value = "Сессия недействительна — войди заново"
+                _accountMessage.value = "Session is no longer valid — sign in again"
             } catch (error: BackendException) {
                 _accountMessage.value = error.message
             } catch (error: Exception) {
-                log.warn("Операция с бэкендом не удалась", error)
+                log.warn("Backend operation failed", error)
                 _accountMessage.value = error.message ?: error.javaClass.simpleName
             } finally {
                 _busy.value = false

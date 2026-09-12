@@ -14,7 +14,7 @@ object Pcm16 {
     /** 48000 → 24000: среднее пары соседних отсчётов. */
     fun decimateByTwo(source: ByteArray): ByteArray {
         require(source.size % (2 * BYTES_PER_SAMPLE) == 0) {
-            "Ожидается целое число пар отсчётов PCM16, получено ${source.size} байт"
+            "Expected a whole number of PCM16 sample pairs, got ${source.size} bytes"
         }
         val result = ByteArray(source.size / 2)
         var read = 0
@@ -31,7 +31,7 @@ object Pcm16 {
     /** 24000 → 48000: каждый отсчёт дублируется. */
     fun upsampleByTwo(source: ByteArray): ByteArray {
         require(source.size % BYTES_PER_SAMPLE == 0) {
-            "Ожидается целое число отсчётов PCM16, получено ${source.size} байт"
+            "Expected a whole number of PCM16 samples, got ${source.size} bytes"
         }
         val result = ByteArray(source.size * 2)
         var read = 0

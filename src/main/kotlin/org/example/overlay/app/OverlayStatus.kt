@@ -5,40 +5,40 @@ sealed interface OverlayStatus {
     val label: String
 
     data object Disconnected : OverlayStatus {
-        override val label = "Не подключён"
+        override val label = "Disconnected"
     }
 
     /** Голос включён, сессии нет: в push-to-talk это нормальное состояние между фразами. */
     data object Ready : OverlayStatus {
-        override val label = "Готов"
+        override val label = "Ready"
     }
 
     data object Connecting : OverlayStatus {
-        override val label = "Подключаюсь"
+        override val label = "Connecting"
     }
 
     data object Listening : OverlayStatus {
-        override val label = "Слушаю"
+        override val label = "Listening"
     }
 
     data object Thinking : OverlayStatus {
-        override val label = "Думаю"
+        override val label = "Thinking"
     }
 
     data object Speaking : OverlayStatus {
-        override val label = "Говорю"
+        override val label = "Speaking"
     }
 
     /** То же самое, но без озвучки: ответ приходит текстом. */
     data object Answering : OverlayStatus {
-        override val label = "Отвечает"
+        override val label = "Answering"
     }
 
     data class Reconnecting(val attempt: Int, val maxAttempts: Int? = null) : OverlayStatus {
-        override val label get() = "Переподключаюсь ($attempt${maxAttempts?.let { "/$it" } ?: ""})"
+        override val label get() = "Reconnecting ($attempt${maxAttempts?.let { "/$it" } ?: ""})"
     }
 
     data class Failed(val reason: String) : OverlayStatus {
-        override val label get() = "Ошибка"
+        override val label get() = "Error"
     }
 }

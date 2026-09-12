@@ -18,7 +18,7 @@ data class AudioDevice(val name: String, val mixer: Mixer.Info?)
  */
 object AudioDevices {
 
-    const val SYSTEM_DEFAULT = "Системное по умолчанию"
+    const val SYSTEM_DEFAULT = "System default"
 
     fun inputs(): List<AudioDevice> = list(TargetDataLine::class.java)
 

@@ -2,7 +2,7 @@ package org.example.overlay.app
 
 /**
  * Пользовательские настройки. Лежат открытым текстом в `settings.json` — секретов здесь нет
- * (токен бэкенда живёт в `session.bin` под DPAPI, JWT Inworld на диск не пишется вовсе).
+ * (токен и BYOK-ключи живут в отдельных файлах под DPAPI).
  */
 data class Settings(
     /** Меняется только правкой `settings.json`: в консоли этого поля нет. */
@@ -11,14 +11,16 @@ data class Settings(
     val audio: AudioSettings = AudioSettings(),
     /** VK-код клавиши push-to-talk. По умолчанию Right Alt (`VK_RMENU`), §5.1. */
     val pttKeyCode: Int = DEFAULT_PTT_KEY_CODE,
+    /** Модификаторы комбинации; отдельное поле сохраняет совместимость со старыми settings.json. */
+    val pttModifierKeyCodes: List<Int> = emptyList(),
     /** Модель ответа из GET /voice/models. `null` — серверная по умолчанию. */
     val chatModel: String? = null,
     /** Модель распознавания речи оттуда же. `null` — клиентский дефолт [DEFAULT_STT_MODEL]. */
     val sttModel: String? = null,
-    /** Язык распознавания: `ru` или `en`. `null` — авто: сервер не передаёт язык в Inworld. */
-    val sttLanguage: String? = null,
     val rememberPassword: Boolean = false,
 ) {
+    fun pttKeyCodes(): List<Int> = (pttModifierKeyCodes + pttKeyCode).distinct()
+
     companion object {
         const val DEFAULT_BASE_URL = "https://duoxik.space/mcp-destiny2-client"
         const val DEFAULT_PTT_KEY_CODE = 0xA5

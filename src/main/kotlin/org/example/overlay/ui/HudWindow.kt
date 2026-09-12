@@ -104,10 +104,10 @@ private const val SYNC_TICK_MS = 1_000L
 private fun formatAgo(then: Instant, now: Instant): String {
     val seconds = Duration.between(then, now).seconds.coerceAtLeast(0)
     return when {
-        seconds < 60 -> "$seconds с. назад"
-        seconds < 60 * 60 -> "${seconds / 60} мин. назад"
-        seconds < 24 * 60 * 60 -> "${seconds / 3600} ч. назад"
-        else -> "${seconds / (24 * 3600)} дн. назад"
+        seconds < 60 -> "$seconds s ago"
+        seconds < 60 * 60 -> "${seconds / 60} min ago"
+        seconds < 24 * 60 * 60 -> "${seconds / 3600} h ago"
+        else -> "${seconds / (24 * 3600)} d ago"
     }
 }
 
@@ -1143,16 +1143,16 @@ private fun HeaderButton(chromeAlpha: Float, onClick: () -> Unit, content: @Comp
 private fun AuthBanner(url: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
     Column {
         Text(
-            text = "Открой ссылку и вернись в игру — привязка подтянется сама.",
+            text = "Open the link and return to the game — the connection will update automatically.",
             color = OverlayColors.Warn,
             fontSize = 12.sp,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onOpen) {
-                Text("Открыть в браузере", color = OverlayColors.Accent, fontSize = 12.sp)
+                Text("Open in browser", color = OverlayColors.Accent, fontSize = 12.sp)
             }
             TextButton(onClick = onDismiss) {
-                Text("Скрыть", color = OverlayColors.TextDim, fontSize = 12.sp)
+                Text("Hide", color = OverlayColors.TextDim, fontSize = 12.sp)
             }
         }
         // Ссылка мелким шрифтом — на случай, если браузер не открылся (§5.3).
@@ -1165,7 +1165,7 @@ private fun ToolLine(entry: ToolLogEntry) {
     // Поиск — особая строка: после ответа игрок видит, что данные пришли из интернета.
     if (entry.isWebSearch) {
         Text(
-            text = "🌐 Ответ найден в интернете",
+            text = "🌐 Answer grounded with web search",
             color = OverlayColors.TextDim,
             fontSize = 11.sp,
             maxLines = 1,
@@ -1174,7 +1174,7 @@ private fun ToolLine(entry: ToolLogEntry) {
         return
     }
     Text(
-        text = "${entry.name} → ${entry.status} (${entry.durationMs} мс)",
+        text = "${entry.name} → ${entry.status} (${entry.durationMs} ms)",
         color = if (entry.isFailure) OverlayColors.Error else OverlayColors.TextDim,
         fontSize = 11.sp,
         maxLines = 1,

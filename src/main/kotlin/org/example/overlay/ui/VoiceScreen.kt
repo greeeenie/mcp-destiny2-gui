@@ -21,9 +21,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
@@ -37,46 +41,76 @@ import org.example.overlay.audio.AudioDevices
 import org.example.overlay.backend.VoiceModelOption
 import org.example.overlay.backend.VoiceModels
 import org.example.overlay.input.VirtualKeys
+import org.example.overlay.input.isPhysicalKeyDown
+import kotlinx.coroutines.delay
 
-/** Захват речи: микрофон, push-to-talk, модель STT и язык распознавания. */
+/** Захват речи: микрофон, push-to-talk и модель STT. */
 @Composable
 fun VoiceScreen(state: AppState) {
     val settings by state.settings.collectAsState()
     val message by state.voiceMessage.collectAsState()
     val models by state.chatModels.collectAsState()
     val inputs = remember { AudioDevices.inputs() }
+    var recordingShortcut by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose { state.setHotkeyCaptureActive(false) }
+    }
+
+    LaunchedEffect(recordingShortcut) {
+        if (!recordingShortcut) return@LaunchedEffect
+        var candidate = emptyList<Int>()
+        while (recordingShortcut) {
+            val down = VirtualKeys.RECORDABLE_CODES.filter(::isPhysicalKeyDown)
+            if (down.size > candidate.size) candidate = down
+            if (candidate.isNotEmpty() && down.isEmpty()) {
+                val shortcut = VirtualKeys.normalize(candidate)
+                state.updateSettings {
+                    it.copy(pttKeyCode = shortcut.last(), pttModifierKeyCodes = shortcut.dropLast(1))
+                }
+                state.setHotkeyCaptureActive(false)
+                recordingShortcut = false
+            }
+            delay(16)
+        }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         SectionColumns {
             ConsoleSection("Push-to-talk", Modifier.weight(1f)) {
-                Text("Клавиша разговора", color = OverlayColors.TextMuted, fontSize = 13.sp)
+                Text("Shortcut", color = OverlayColors.TextMuted, fontSize = 13.sp)
                 Spacer(Modifier.height(10.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    VirtualKeys.NAMES.entries.chunked(4).forEach { entries ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            entries.forEach { (code, name) ->
-                                ConsoleChoice(
-                                    text = name,
-                                    selected = settings.pttKeyCode == code,
-                                    onClick = { state.updateSettings { it.copy(pttKeyCode = code) } },
-                                )
-                            }
-                        }
-                    }
-                }
+                ConsoleChoice(
+                    text = if (recordingShortcut) {
+                        "Press and release a shortcut…"
+                    } else {
+                        VirtualKeys.combinationName(settings.pttKeyCodes())
+                    },
+                    selected = recordingShortcut,
+                    onClick = {
+                        recordingShortcut = !recordingShortcut
+                        state.setHotkeyCaptureActive(recordingShortcut)
+                    },
+                )
                 Spacer(Modifier.height(10.dp))
-                ConsoleHint("Нажмите и удерживайте выбранную клавишу, чтобы говорить.")
+                ConsoleHint(
+                    if (recordingShortcut) {
+                        "Hold the full combination, then release it."
+                    } else {
+                        "Click to record a key or combination. Hold it while speaking."
+                    },
+                )
             }
 
             androidx.compose.material3.VerticalDivider(
-                modifier = Modifier.height(260.dp),
+                modifier = Modifier.height(360.dp),
                 color = OverlayColors.Divider,
             )
 
-            ConsoleSection("Распознавание голоса", Modifier.weight(1f)) {
+            ConsoleSection("Speech recognition", Modifier.weight(1f)) {
                 val available = models
                 if (available != null && available.sttOptions.isNotEmpty()) {
-                    Text("Модель", color = OverlayColors.TextMuted, fontSize = 13.sp)
+                    Text("Model", color = OverlayColors.TextMuted, fontSize = 13.sp)
                     Spacer(Modifier.height(10.dp))
                     ModelSelector(
                         options = available.sttOptions,
@@ -87,30 +121,17 @@ fun VoiceScreen(state: AppState) {
                     Spacer(Modifier.height(24.dp))
                 }
 
-                Text("Язык", color = OverlayColors.TextMuted, fontSize = 13.sp)
+                Text("Microphone", color = OverlayColors.TextMuted, fontSize = 13.sp)
                 Spacer(Modifier.height(10.dp))
-                ModelSelector(
-                    options = STT_LANGUAGES,
-                    default = STT_LANGUAGE_AUTO,
-                    current = settings.sttLanguage,
-                    onSelect = { choice -> state.updateSettings { it.copy(sttLanguage = choice) } },
+                MicrophoneDeviceList(
+                    devices = inputs,
+                    selectedName = settings.audio.inputMixer,
+                    onSelect = { device ->
+                        val name = device.mixer?.let { device.name }
+                        state.updateSettings { it.copy(audio = it.audio.copy(inputMixer = name)) }
+                    },
                 )
-                Spacer(Modifier.height(10.dp))
-                ConsoleHint("Авто позволяет смешивать русский и английский в одной фразе; явный язык — если авто ошибается.")
             }
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        ConsoleSection("Микрофон") {
-            MicrophoneDeviceList(
-                devices = inputs,
-                selectedName = settings.audio.inputMixer,
-                onSelect = { device ->
-                    val name = device.mixer?.let { device.name }
-                    state.updateSettings { it.copy(audio = it.audio.copy(inputMixer = name)) }
-                },
-            )
         }
 
         message?.let {
@@ -127,8 +148,8 @@ private fun MicrophoneDeviceList(
     onSelect: (AudioDevice) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    // Высота — ровно три строки: постоянный скроллбар справа подсказывает, что ниже есть ещё.
-    Box(modifier = Modifier.width(340.dp).height(123.dp)) {
+    // Пять строк видны сразу; постоянный скроллбар справа подсказывает, что ниже есть ещё.
+    Box(modifier = Modifier.fillMaxWidth().height(202.dp)) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(end = 14.dp)) {
             items(devices) { device ->
                 val isSelected = device.name == (selectedName ?: AudioDevices.SYSTEM_DEFAULT)
@@ -207,17 +228,8 @@ internal fun WebSearchIndicator(models: VoiceModels, chatModel: String?) {
     val selectedId = chatModel?.takeIf { id -> models.options.any { it.id == id } } ?: models.default
     val selected = models.options.firstOrNull { it.id == selectedId }
     if (selected?.webSearch == true) {
-        Text("●  Веб-поиск включён", color = OverlayColors.Ok, fontSize = 11.sp)
+        Text("●  Web search enabled", color = OverlayColors.Ok, fontSize = 11.sp)
     } else {
-        Text("○  Веб-поиск выключен", color = OverlayColors.TextDim, fontSize = 11.sp)
+        Text("○  Web search disabled", color = OverlayColors.TextDim, fontSize = 11.sp)
     }
 }
-
-/** Локальный список: серверу уходит код ISO 639-1, «auto» означает «язык не передавать». */
-private const val STT_LANGUAGE_AUTO = "auto"
-
-private val STT_LANGUAGES = listOf(
-    VoiceModelOption(id = STT_LANGUAGE_AUTO, label = "Авто"),
-    VoiceModelOption(id = "ru", label = "Русский"),
-    VoiceModelOption(id = "en", label = "English"),
-)

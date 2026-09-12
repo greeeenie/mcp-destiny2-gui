@@ -39,6 +39,8 @@ class VoiceRuntime(
     private val settings: SettingsHolder,
     private val backend: BackendClient,
     private val tokenProvider: () -> String?,
+    private val providerApiKey: (String?) -> String?,
+    private val hotkeyEnabled: () -> Boolean,
     private val onTurnStarted: () -> Unit,
     private val onUserText: (String) -> Unit,
     private val onEvent: (ChatStreamEvent) -> Unit,
@@ -81,7 +83,11 @@ class VoiceRuntime(
         }
         hub.start()
 
-        val hotkey = GlobalHotkey(keyCode = { settings.current.pttKeyCode }, scope = scope)
+        val hotkey = GlobalHotkey(
+            keyCodes = { settings.current.pttKeyCodes() },
+            scope = scope,
+            enabled = hotkeyEnabled,
+        )
         hotkey.start(
             onDown = {
                 if (_ready.value && (_phase.value == VoicePhase.IDLE || _phase.value == VoicePhase.ANSWERING)) {
@@ -115,7 +121,7 @@ class VoiceRuntime(
 
         parts = Parts(hub, hotkey)
         _ready.value = true
-        log.info("Голосовой тракт готов: {} Гц, клавиша 0x{}", SAMPLE_RATE, current.pttKeyCode.toString(16))
+        log.info("Voice pipeline ready: {} Hz, shortcut={}", SAMPLE_RATE, current.pttKeyCodes())
     }
 
     suspend fun stop() = lifecycle.withLock {
@@ -150,12 +156,12 @@ class VoiceRuntime(
         turnJob?.cancel()
         turnJob = scope.launch {
             try {
-                val token = tokenProvider() ?: error("Нет сессии бэкенда — нужен вход")
+                val token = tokenProvider() ?: error("No backend session — sign in first")
                 val text = backend.transcribe(
                     token,
                     WavEncoder.encode(pcm, SAMPLE_RATE),
                     settings.current.sttModel ?: Settings.DEFAULT_STT_MODEL,
-                    settings.current.sttLanguage,
+                    language = null,
                 )
                 if (!turns.isCurrent(turn)) return@launch
                 if (text.isBlank()) {
@@ -167,14 +173,17 @@ class VoiceRuntime(
                         _phase.value = VoicePhase.ANSWERING
                     }
                 ) return@launch
-                backend.streamChat(token, text, settings.current.chatModel) { event ->
+                val model = settings.current.chatModel
+                val apiKey = providerApiKey(model)
+                    ?: error("Enter the selected provider API key in the Assistant section")
+                backend.streamChat(token, text, model, apiKey) { event ->
                     turns.runIfCurrent(turn) { onEvent(event) }
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
                 turns.runIfCurrent(turn) {
-                    log.warn("Голосовой ход не удался", error)
+                    log.warn("Voice turn failed", error)
                     onError(error.message ?: error.javaClass.simpleName)
                 }
             } finally {

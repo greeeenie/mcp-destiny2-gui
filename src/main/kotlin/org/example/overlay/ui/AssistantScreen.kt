@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -15,9 +17,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.example.overlay.app.AppState
+import org.example.overlay.backend.ProviderApiKeys
 import org.example.overlay.backend.VoiceModelOption
 
 /** Модель ответа и её контекст отделены от распознавания речи. */
@@ -25,12 +30,13 @@ import org.example.overlay.backend.VoiceModelOption
 fun AssistantScreen(state: AppState) {
     val settings by state.settings.collectAsState()
     val models by state.chatModels.collectAsState()
+    val providerApiKeys by state.providerApiKeys.collectAsState()
     val message by state.voiceMessage.collectAsState()
 
     Column(Modifier.fillMaxWidth()) {
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             ConsoleUtilityButton(
-                text = "Сбросить историю",
+                text = "Clear history",
                 icon = { HistoryActionIcon() },
                 onClick = state::clearConversation,
                 emphasized = true,
@@ -39,16 +45,18 @@ fun AssistantScreen(state: AppState) {
         }
 
         Spacer(Modifier.height(30.dp))
-        ConsoleSection("Модель ответа") {
+        ConsoleSection("Response model") {
             val available = models
             if (available == null) {
-                Text("Получаю список моделей…", color = OverlayColors.TextDim, fontSize = 12.sp)
+                Text("Loading models…", color = OverlayColors.TextDim, fontSize = 12.sp)
             } else {
                 ProviderModelSelector(
                     options = available.options,
                     default = available.default,
                     current = settings.chatModel,
                     onSelect = { choice -> state.updateSettings { it.copy(chatModel = choice) } },
+                    providerApiKeys = providerApiKeys,
+                    onApiKeySave = state::updateProviderApiKey,
                 )
                 Spacer(Modifier.height(10.dp))
                 WebSearchIndicator(available, settings.chatModel)
@@ -68,12 +76,17 @@ private fun ProviderModelSelector(
     default: String,
     current: String?,
     onSelect: (String?) -> Unit,
+    providerApiKeys: ProviderApiKeys,
+    onApiKeySave: (String, String) -> Unit,
 ) {
     val selectedModel = current?.takeIf { id -> options.any { it.id == id } }
-    val providers = options.map(VoiceModelOption::provider).distinct()
+    val providers = options.map(VoiceModelOption::provider).distinct().sortedBy { if (it == "OPEN_ROUTER") 0 else 1 }
     val selectedProvider = options.firstOrNull { it.id == (selectedModel ?: default) }?.provider
         ?: providers.firstOrNull().orEmpty()
     var activeProvider by remember(options, selectedModel, default) { mutableStateOf(selectedProvider) }
+    var apiKey by remember(activeProvider, providerApiKeys) {
+        mutableStateOf(providerApiKeys.forProvider(activeProvider))
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -91,7 +104,35 @@ private fun ProviderModelSelector(
             current = selectedModel,
             onSelect = onSelect,
         )
+        Spacer(Modifier.height(4.dp))
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = { apiKey = it },
+            label = { Text(activeProvider.apiKeyLabel()) },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.width(420.dp),
+        )
+        Text(activeProvider.apiKeyHint(), color = OverlayColors.TextDim, fontSize = 11.sp)
+        Button(
+            onClick = { onApiKeySave(activeProvider, apiKey) },
+            enabled = apiKey.isNotBlank(),
+            shape = RectangleShape,
+        ) {
+            Text("Save key")
+        }
     }
+}
+
+private fun String.apiKeyLabel(): String = when (this) {
+    "INWORLD" -> "Inworld API key"
+    "OPEN_ROUTER" -> "OpenRouter API key"
+    else -> "API key"
+}
+
+private fun String.apiKeyHint(): String = when (this) {
+    "INWORLD" -> "Base64-encoded key:secret. Stored locally with Windows DPAPI protection."
+    else -> "Stored locally with Windows DPAPI protection."
 }
 
 private fun String.displayName(): String = when (this) {

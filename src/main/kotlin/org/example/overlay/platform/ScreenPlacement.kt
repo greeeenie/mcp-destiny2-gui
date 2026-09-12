@@ -27,7 +27,7 @@ object ScreenPlacement {
             val centerX = savedX + widthDp / 2
             val centerY = savedY + heightDp / 2
             if (screens.any { it.contains(centerX, centerY) }) return Placement(savedX, savedY)
-            log.info("Сохранённое положение HUD ({}, {}) вне экранов — ставлю в угол основного", savedX, savedY)
+            log.info("Saved HUD position ({}, {}) is outside all screens — using the primary screen corner", savedX, savedY)
         }
         val primary = screens.firstOrNull() ?: return Placement(MARGIN_DP, MARGIN_DP)
         return Placement(
@@ -170,7 +170,7 @@ object ScreenPlacement {
             )
         }
     } catch (error: Exception) {
-        log.warn("Не удалось получить границы экранов: {}", error.toString())
+        log.warn("Could not read screen bounds: {}", error.toString())
         emptyList()
     }
 }

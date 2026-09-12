@@ -15,6 +15,7 @@ import org.example.overlay.app.AppState
 import org.example.overlay.app.SettingsHolder
 import org.example.overlay.app.SettingsStore
 import org.example.overlay.backend.BackendClient
+import org.example.overlay.backend.ProviderApiKeyStore
 import org.example.overlay.backend.SessionStore
 import org.example.overlay.ui.ConsoleWindow
 import org.example.overlay.ui.HudWindow
@@ -33,11 +34,13 @@ fun main() {
     // Адрес бэкенда читается на каждый запрос: его можно поменять в консоли без перезапуска.
     val backend = BackendClient(baseUrl = { settingsHolder.current.baseUrl }, http = httpClient)
     val sessionStore = SessionStore(paths.sessionFile)
+    val providerApiKeyStore = ProviderApiKeyStore(paths.providerApiKeysFile)
     val updates = UpdateManager(scope = appScope, http = httpClient, mapper = BackendClient.MAPPER)
 
     val state = AppState(
         settingsHolder = settingsHolder,
         sessionStore = sessionStore,
+        providerApiKeyStore = providerApiKeyStore,
         backend = backend,
         updates = updates,
         scope = appScope,
@@ -62,8 +65,8 @@ fun main() {
             tooltip = "Destiny 2 Assistant",
             onAction = { state.toggleConsole() },
             menu = {
-                Item("Консоль", onClick = { state.openConsole() })
-                Item("Выход", onClick = { exitApplication() })
+                Item("Console", onClick = { state.openConsole() })
+                Item("Exit", onClick = { exitApplication() })
             },
         )
 

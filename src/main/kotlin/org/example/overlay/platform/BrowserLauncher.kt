@@ -16,11 +16,11 @@ object BrowserLauncher {
             desktop.browse(URI.create(url))
             true
         } else {
-            log.warn("Открытие браузера не поддерживается в этой системе")
+            log.warn("Opening a browser is not supported on this system")
             false
         }
     } catch (error: Exception) {
-        log.warn("Не удалось открыть браузер: {}", error.toString())
+        log.warn("Could not open browser: {}", error.toString())
         false
     }
 

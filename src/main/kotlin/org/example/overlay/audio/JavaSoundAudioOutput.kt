@@ -52,9 +52,9 @@ class JavaSoundAudioOutput(
                 it.start()
             }
         } catch (error: LineUnavailableException) {
-            throw AudioDeviceException("Устройство вывода занято", error)
+            throw AudioDeviceException("Output device is busy", error)
         } catch (error: RuntimeException) {
-            throw AudioDeviceException("Не удалось открыть устройство вывода", error)
+            throw AudioDeviceException("Could not open output device", error)
         }
         line = openedLine
         playbackJob = scope.launch(Dispatchers.IO) { playback(openedLine, setup) }
@@ -67,11 +67,11 @@ class JavaSoundAudioOutput(
     override fun currentPlaybackGeneration(): Long = playbackGeneration.get()
 
     override suspend fun play(bytes: ByteArray, generation: Long) {
-        check(playbackJob != null) { "Вывод звука не запущен" }
+        check(playbackJob != null) { "Audio output is not running" }
         try {
             queue.send(PlaybackCommand.Audio(bytes.copyOf(), generation))
         } catch (error: Throwable) {
-            throw AudioDeviceException("Очередь воспроизведения недоступна", error)
+            throw AudioDeviceException("Playback queue is unavailable", error)
         }
     }
 
@@ -82,7 +82,7 @@ class JavaSoundAudioOutput(
     }
 
     override suspend fun awaitPlaybackComplete(): PlaybackCompletion {
-        check(playbackJob != null) { "Вывод звука не запущен" }
+        check(playbackJob != null) { "Audio output is not running" }
         val barrier = PlaybackCommand.Barrier(
             generation = playbackGeneration.get(),
             completion = CompletableDeferred(),
@@ -91,7 +91,7 @@ class JavaSoundAudioOutput(
             queue.send(barrier)
             return barrier.completion.await()
         } catch (error: Throwable) {
-            throw AudioDeviceException("Барьер воспроизведения недоступен", error)
+            throw AudioDeviceException("Playback barrier is unavailable", error)
         }
     }
 
@@ -121,14 +121,14 @@ class JavaSoundAudioOutput(
         val doubledInfo = DataLine.Info(SourceDataLine::class.java, doubled.toJavax())
         if (lineSupported(mixer, doubledInfo)) {
             log.info(
-                "Вывод не умеет {} Гц — открываю {} Гц и дублирую отсчёты",
+                "Output does not support {} Hz — opening {} Hz and duplicating samples",
                 format.sampleRate,
                 doubled.sampleRate,
             )
             return PlaybackSetup(doubled, upsample = true)
         }
 
-        throw AudioDeviceException("Устройство вывода не поддерживает ${format.toJavax().describe()}")
+        throw AudioDeviceException("Output device does not support ${format.toJavax().describe()}")
     }
 
     private suspend fun playback(activeLine: SourceDataLine, setup: PlaybackSetup) {
@@ -144,7 +144,7 @@ class JavaSoundAudioOutput(
                         while (offset < payload.size && command.generation == playbackGeneration.get()) {
                             val written = activeLine.write(payload, offset, payload.size - offset)
                             if (written == 0 && command.generation != playbackGeneration.get()) break
-                            if (written <= 0) throw AudioDeviceException("Устройство вывода перестало принимать звук")
+                            if (written <= 0) throw AudioDeviceException("Output device stopped accepting audio")
                             offset += written
                         }
                     }
@@ -164,7 +164,7 @@ class JavaSoundAudioOutput(
             }
         } catch (error: Throwable) {
             if (playbackJob?.isActive == true) {
-                queue.close(error.asAudioFailure("Воспроизведение прервалось"))
+                queue.close(error.asAudioFailure("Playback stopped unexpectedly"))
             }
         } finally {
             activeBarrier?.completion?.complete(PlaybackCompletion.FLUSHED)
