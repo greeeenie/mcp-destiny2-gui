@@ -295,6 +295,14 @@ class AppState(
     private fun cycleHudInteractionMode() {
         val nextMode = synchronized(hudFeedLock) {
             val next = _hudInteractionMode.value.next()
+            if (next == HudInteractionMode.EXPANDED_PASS_THROUGH &&
+                _assistantTranscript.value.isBlank() && _userTranscript.value.isBlank()
+            ) {
+                val last = _turnHistory.value.lastIndex.takeIf { it >= 0 }
+                _turnHistoryIndex.update { current ->
+                    hudHistoryIndexForHover(current, last, hovered = true)
+                }
+            }
             _hudInteractionMode.value = next
             _hudFeedRevision.value += 1
             _hudDismissed.value = false
