@@ -6,8 +6,13 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector4D
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.TwoWayConverter
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
@@ -50,12 +55,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -113,15 +121,69 @@ private fun formatAgo(then: Instant, now: Instant): String {
 
 internal fun hudActivityText(status: OverlayStatus): String? = when (status) {
     OverlayStatus.Ready -> null
-    OverlayStatus.Listening -> "Listening..."
-    OverlayStatus.Thinking -> "Thinking..."
-    OverlayStatus.SearchingWeb -> "Searching web..."
-    OverlayStatus.Answering -> "Answering..."
-    OverlayStatus.Speaking -> "Speaking..."
-    OverlayStatus.Connecting -> "Connecting..."
-    is OverlayStatus.Reconnecting -> "${status.label}..."
+    OverlayStatus.Listening -> "Listening"
+    OverlayStatus.Thinking -> "Thinking"
+    OverlayStatus.SearchingWeb -> "Searching web"
+    OverlayStatus.Answering -> "Answering"
+    OverlayStatus.Speaking -> "Speaking"
+    OverlayStatus.Connecting -> "Connecting"
+    is OverlayStatus.Reconnecting -> status.label
     OverlayStatus.Disconnected -> "Disconnected"
     is OverlayStatus.Failed -> "Error"
+}
+
+internal fun isAnimatedHudActivity(status: OverlayStatus): Boolean = when (status) {
+    OverlayStatus.Listening,
+    OverlayStatus.Thinking,
+    OverlayStatus.SearchingWeb,
+    OverlayStatus.Answering,
+    OverlayStatus.Speaking,
+    OverlayStatus.Connecting,
+    is OverlayStatus.Reconnecting,
+    -> true
+
+    OverlayStatus.Ready,
+    OverlayStatus.Disconnected,
+    is OverlayStatus.Failed,
+    -> false
+}
+
+@Composable
+private fun AnimatedHudActivityText(label: String) {
+    var dotCount by remember(label) { mutableStateOf(1) }
+    var textWidth by remember(label) { mutableStateOf(1) }
+    LaunchedEffect(label) {
+        while (true) {
+            delay(350)
+            dotCount = dotCount % 3 + 1
+        }
+    }
+
+    val transition = rememberInfiniteTransition(label = "HUD activity shimmer")
+    val shimmerProgress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "HUD activity shimmer progress",
+    )
+    val width = textWidth.toFloat()
+    val shimmerCenter = (-0.4f + shimmerProgress * 1.8f) * width
+    val shimmerRadius = width * 0.35f
+    val brush = Brush.linearGradient(
+        colors = listOf(OverlayColors.TextDim, OverlayColors.Accent, OverlayColors.TextDim),
+        start = Offset(shimmerCenter - shimmerRadius, 0f),
+        end = Offset(shimmerCenter + shimmerRadius, 0f),
+    )
+
+    Text(
+        text = label + ".".repeat(dotCount),
+        style = TextStyle(brush = brush, fontSize = 11.sp),
+        maxLines = 1,
+        modifier = Modifier.onSizeChanged { textWidth = it.width.coerceAtLeast(1) },
+    )
 }
 
 private fun quantizeUp(value: Float, step: Float, minimum: Float, maximum: Float): Float =
@@ -899,12 +961,16 @@ fun HudWindow(state: AppState) {
                                 SyncIcon(OverlayColors.TextDim, Modifier.size(width = 11.dp, height = 13.dp))
                                 Spacer(Modifier.width(6.dp))
                             }
-                            Text(
-                                text = headerText,
-                                color = OverlayColors.TextDim,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                            )
+                            if (activityText != null && isAnimatedHudActivity(status)) {
+                                AnimatedHudActivityText(headerText)
+                            } else {
+                                Text(
+                                    text = headerText,
+                                    color = OverlayColors.TextDim,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                )
+                            }
                         }
                     }
                 }
