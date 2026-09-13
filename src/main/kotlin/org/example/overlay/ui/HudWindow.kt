@@ -82,6 +82,7 @@ import org.example.overlay.app.nextHudHistoryIndex
 import org.example.overlay.markdown.AnswerContent
 import org.example.overlay.markdown.MdBlock
 import org.example.overlay.platform.ScreenPlacement
+import org.example.overlay.platform.setWindowClickThrough
 import org.example.overlay.update.UpdateState
 import java.awt.geom.Rectangle2D
 import java.time.Duration
@@ -147,14 +148,6 @@ internal fun isAnimatedHudActivity(status: OverlayStatus): Boolean = when (statu
     is OverlayStatus.Failed,
     -> false
 }
-
-internal fun shouldShowHudWindow(
-    prepared: Boolean,
-    expansionRequested: Boolean,
-    expanded: Boolean,
-    countingDown: Boolean,
-    dismissed: Boolean,
-): Boolean = prepared && (expansionRequested || expanded || countingDown || dismissed)
 
 @Composable
 private fun AnimatedHudActivityText(label: String) {
@@ -288,15 +281,12 @@ private const val SYNC_FADE_OUT_MS = 350
 /** Пауза перед гашением давности синхронизации: отсчитывается от начала сворачивания. */
 private const val SYNC_FADE_OUT_DELAY_MS = 200
 
-/** Финальная пилюля мягко растворяется перед тем, как нативное окно перестаёт перехватывать мышь. */
-private const val HUD_HIDE_FADE_MS = 220
-
 /**
  * Оверлей поверх игры (§5.3).
  *
- * Во время хода HUD разворачивается в полосу и остаётся видимым, пока на экране висит ответ.
- * После ответа запускается отсчёт (см. `AppState.collapseFraction`): кольцо тает, наведение
- * возвращает его на старт, по нулю HUD сворачивается и полностью скрывается.
+ * В покое HUD остаётся пилюлей с призраком, но исключается из нативного hit-test, поэтому
+ * мышь проходит в игру. Во время хода HUD становится интерактивным, разворачивается в полосу
+ * и остаётся видимым, пока на экране висит ответ. Затем он сворачивается обратно в пилюлю.
  *
  * Переход пилюля ↔ полоса устроен так: дорожка уровня, шестерёнка и лента ответа стоят
  * на своих конечных местах у якорного края и только меняют прозрачность вслед за шириной
@@ -312,9 +302,9 @@ private const val HUD_HIDE_FADE_MS = 220
  * может на один кадр перенести старый Skia-буфер раньше, чем Compose нарисует новый.
  *
  * `focusable = false` — ключевое свойство: без него клик по HUD отбирает фокус у Destiny 2
- * и персонаж перестаёт слушаться WASD. Мышиные события в нефокусируемое окно AWT доставляет
- * по-прежнему, поэтому кнопки и ссылки работают; клавиатурного ввода в HUD нет — для него есть
- * консоль.
+ * и персонаж перестаёт слушаться WASD. Развёрнутый HUD принимает мышь для кнопок и ссылок,
+ * а свернутая пилюля получает `WS_EX_TRANSPARENT`; клавиатурного ввода здесь нет — для него
+ * есть консоль.
  */
 @OptIn(FlowPreview::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -518,35 +508,10 @@ fun HudWindow(state: AppState) {
         }
     }
 
-    val windowRequested = shouldShowHudWindow(
-        prepared = windowPrepared,
-        expansionRequested = expansionRequested,
-        expanded = expanded,
-        countingDown = collapseFraction != null,
-        dismissed = dismissed,
-    )
-    var windowVisible by remember { mutableStateOf(false) }
-    var windowOpacityTarget by remember { mutableStateOf(0f) }
-    LaunchedEffect(windowRequested) {
-        if (windowRequested) {
-            windowVisible = true
-            windowOpacityTarget = 1f
-        } else {
-            windowOpacityTarget = 0f
-            delay(HUD_HIDE_FADE_MS.toLong())
-            windowVisible = false
-        }
-    }
-    val windowOpacity by animateFloatAsState(
-        targetValue = windowOpacityTarget,
-        animationSpec = tween(if (windowOpacityTarget == 0f) HUD_HIDE_FADE_MS else 0),
-        label = "HUD window opacity",
-    )
-
     Window(
         onCloseRequest = { /* HUD не закрывается: выход — через трей */ },
         state = windowState,
-        visible = windowVisible,
+        visible = windowPrepared,
         title = "Destiny 2 Assistant",
         icon = painterResource("icons/app-icon.png"),
         undecorated = true,
@@ -628,6 +593,17 @@ fun HudWindow(state: AppState) {
         var animating by remember { mutableStateOf(false) }
         var showPill by remember { mutableStateOf(true) }
         var feedRevealed by remember { mutableStateOf(false) }
+
+        // В покое призрак остаётся видимым, но не участвует в hit-test: игровые клики и движение
+        // мыши проходят прямо в Destiny. Во время хода возвращаем интерактивность HUD.
+        LaunchedEffect(windowPrepared, showPill, animating, expansionRequested) {
+            if (windowPrepared) {
+                setWindowClickThrough(
+                    window,
+                    enabled = showPill && !animating && !expansionRequested,
+                )
+            }
+        }
 
         // Пока видна пилюля, drag может перенести её на другую половину или другой монитор.
         // Симметричный кожух позволяет сменить направление раскрытия без native setLocation.
@@ -854,7 +830,7 @@ fun HudWindow(state: AppState) {
             )
 
             // Корень окна не рисует ничего: всё видимое — панель со скруглением и клипом.
-            Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = windowOpacity }) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 // Во время анимации используем реальные экранные координаты панели относительно
                 // уже применённого AWT-кожуха. Одного align недостаточно: clamp у края экрана
                 // способен сдвинуть сам якорный край, и в конце получался боковой скачок.
