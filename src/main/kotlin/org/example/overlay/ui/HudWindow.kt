@@ -148,6 +148,14 @@ internal fun isAnimatedHudActivity(status: OverlayStatus): Boolean = when (statu
     -> false
 }
 
+internal fun shouldShowHudWindow(
+    prepared: Boolean,
+    expansionRequested: Boolean,
+    expanded: Boolean,
+    countingDown: Boolean,
+    dismissed: Boolean,
+): Boolean = prepared && (expansionRequested || expanded || countingDown || dismissed)
+
 @Composable
 private fun AnimatedHudActivityText(label: String) {
     var dotCount by remember(label) { mutableStateOf(1) }
@@ -283,10 +291,9 @@ private const val SYNC_FADE_OUT_DELAY_MS = 200
 /**
  * Оверлей поверх игры (§5.3).
  *
- * В покое HUD — пилюля с одной иконкой микрофона. Разворачивается в полосу, когда игрок навёл
- * курсор или идёт ход, и остаётся развёрнутым, пока на экране висит прошлый ответ. После ответа
- * запускается отсчёт (см. `AppState.collapseFraction`): кольцо тает, наведение возвращает его
- * на старт, по нулю HUD спадает обратно в пилюлю — сначала высотой, потом шириной.
+ * Во время хода HUD разворачивается в полосу и остаётся видимым, пока на экране висит ответ.
+ * После ответа запускается отсчёт (см. `AppState.collapseFraction`): кольцо тает, наведение
+ * возвращает его на старт, по нулю HUD сворачивается и полностью скрывается.
  *
  * Переход пилюля ↔ полоса устроен так: дорожка уровня, шестерёнка и лента ответа стоят
  * на своих конечных местах у якорного края и только меняют прозрачность вслед за шириной
@@ -511,7 +518,13 @@ fun HudWindow(state: AppState) {
     Window(
         onCloseRequest = { /* HUD не закрывается: выход — через трей */ },
         state = windowState,
-        visible = windowPrepared,
+        visible = shouldShowHudWindow(
+            prepared = windowPrepared,
+            expansionRequested = expansionRequested,
+            expanded = expanded,
+            countingDown = collapseFraction != null,
+            dismissed = dismissed,
+        ),
         title = "Destiny 2 Assistant",
         icon = painterResource("icons/app-icon.png"),
         undecorated = true,
