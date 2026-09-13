@@ -230,11 +230,12 @@ internal fun WebSearchToggle(
     chatModel: String?,
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val selectedId = chatModel?.takeIf { id -> models.options.any { it.id == id } } ?: models.default
     val selected = models.options.firstOrNull { it.id == selectedId }
     val supported = selected?.webSearch == true
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         Switch(
             checked = supported && enabled,
             onCheckedChange = onEnabledChange,
@@ -242,7 +243,11 @@ internal fun WebSearchToggle(
         )
         Spacer(Modifier.width(10.dp))
         Text(
-            if (supported) "Web search" else "Web search is unavailable for this model",
+            when {
+                !supported -> "Web search unavailable"
+                enabled -> "Web search · ON"
+                else -> "Web search · OFF"
+            },
             color = if (supported && enabled) OverlayColors.Ok else OverlayColors.TextDim,
             fontSize = 11.sp,
         )

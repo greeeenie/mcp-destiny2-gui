@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -34,7 +35,10 @@ fun AssistantScreen(state: AppState) {
     val message by state.voiceMessage.collectAsState()
 
     Column(Modifier.fillMaxWidth()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             ConsoleUtilityButton(
                 text = "Clear history",
                 icon = { HistoryActionIcon() },
@@ -42,6 +46,15 @@ fun AssistantScreen(state: AppState) {
                 emphasized = true,
                 modifier = Modifier.width(232.dp),
             )
+            models?.let { available ->
+                WebSearchToggle(
+                    models = available,
+                    chatModel = settings.chatModel,
+                    enabled = settings.webSearchEnabled,
+                    onEnabledChange = { enabled -> state.updateSettings { it.copy(webSearchEnabled = enabled) } },
+                    modifier = Modifier.width(220.dp),
+                )
+            }
         }
 
         Spacer(Modifier.height(30.dp))
@@ -57,13 +70,6 @@ fun AssistantScreen(state: AppState) {
                     onSelect = { choice -> state.updateSettings { it.copy(chatModel = choice) } },
                     providerApiKeys = providerApiKeys,
                     onApiKeySave = state::updateProviderApiKey,
-                )
-                Spacer(Modifier.height(10.dp))
-                WebSearchToggle(
-                    models = available,
-                    chatModel = settings.chatModel,
-                    enabled = settings.webSearchEnabled,
-                    onEnabledChange = { enabled -> state.updateSettings { it.copy(webSearchEnabled = enabled) } },
                 )
             }
         }
