@@ -288,6 +288,9 @@ private const val SYNC_FADE_OUT_MS = 350
 /** Пауза перед гашением давности синхронизации: отсчитывается от начала сворачивания. */
 private const val SYNC_FADE_OUT_DELAY_MS = 200
 
+/** Финальная пилюля мягко растворяется перед тем, как нативное окно перестаёт перехватывать мышь. */
+private const val HUD_HIDE_FADE_MS = 220
+
 /**
  * Оверлей поверх игры (§5.3).
  *
@@ -515,16 +518,35 @@ fun HudWindow(state: AppState) {
         }
     }
 
+    val windowRequested = shouldShowHudWindow(
+        prepared = windowPrepared,
+        expansionRequested = expansionRequested,
+        expanded = expanded,
+        countingDown = collapseFraction != null,
+        dismissed = dismissed,
+    )
+    var windowVisible by remember { mutableStateOf(false) }
+    var windowOpacityTarget by remember { mutableStateOf(0f) }
+    LaunchedEffect(windowRequested) {
+        if (windowRequested) {
+            windowVisible = true
+            windowOpacityTarget = 1f
+        } else {
+            windowOpacityTarget = 0f
+            delay(HUD_HIDE_FADE_MS.toLong())
+            windowVisible = false
+        }
+    }
+    val windowOpacity by animateFloatAsState(
+        targetValue = windowOpacityTarget,
+        animationSpec = tween(if (windowOpacityTarget == 0f) HUD_HIDE_FADE_MS else 0),
+        label = "HUD window opacity",
+    )
+
     Window(
         onCloseRequest = { /* HUD не закрывается: выход — через трей */ },
         state = windowState,
-        visible = shouldShowHudWindow(
-            prepared = windowPrepared,
-            expansionRequested = expansionRequested,
-            expanded = expanded,
-            countingDown = collapseFraction != null,
-            dismissed = dismissed,
-        ),
+        visible = windowVisible,
         title = "Destiny 2 Assistant",
         icon = painterResource("icons/app-icon.png"),
         undecorated = true,
@@ -832,7 +854,7 @@ fun HudWindow(state: AppState) {
             )
 
             // Корень окна не рисует ничего: всё видимое — панель со скруглением и клипом.
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = windowOpacity }) {
                 // Во время анимации используем реальные экранные координаты панели относительно
                 // уже применённого AWT-кожуха. Одного align недостаточно: clamp у края экрана
                 // способен сдвинуть сам якорный край, и в конце получался боковой скачок.
