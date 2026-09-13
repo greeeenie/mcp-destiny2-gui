@@ -82,8 +82,6 @@ import org.example.overlay.app.nextHudHistoryIndex
 import org.example.overlay.markdown.AnswerContent
 import org.example.overlay.markdown.MdBlock
 import org.example.overlay.platform.ScreenPlacement
-import org.example.overlay.platform.isSystemCursorVisible
-import org.example.overlay.platform.setWindowClickThrough
 import org.example.overlay.update.UpdateState
 import java.awt.geom.Rectangle2D
 import java.time.Duration
@@ -109,9 +107,6 @@ private const val HEIGHT_STEP_DP = 8f
 
 /** Тик пересчёта «х назад»: свежая синхронизация показывается с точностью до секунды. */
 private const val SYNC_TICK_MS = 1_000L
-
-/** Скрытый игровой курсор переводит HUD в click-through без заметной задержки. */
-private const val CURSOR_VISIBILITY_POLL_MS = 100L
 
 /** «1 с. назад» → «1 мин. назад» → «1 ч. назад»: давность последней синхронизации. */
 private fun formatAgo(then: Instant, now: Instant): String {
@@ -288,9 +283,7 @@ private const val SYNC_FADE_OUT_DELAY_MS = 200
 /**
  * Оверлей поверх игры (§5.3).
  *
- * В покое HUD остаётся пилюлей с призраком. Пока системный курсор скрыт игровым процессом,
- * всё окно исключается из нативного hit-test и мышь проходит в игру. Когда меню показывает
- * курсор, HUD снова принимает hover, кнопки и ссылки.
+ * В покое HUD остаётся пилюлей с призраком и принимает hover, кнопки и ссылки.
  *
  * Переход пилюля ↔ полоса устроен так: дорожка уровня, шестерёнка и лента ответа стоят
  * на своих конечных местах у якорного края и только меняют прозрачность вслед за шириной
@@ -306,8 +299,7 @@ private const val SYNC_FADE_OUT_DELAY_MS = 200
  * может на один кадр перенести старый Skia-буфер раньше, чем Compose нарисует новый.
  *
  * `focusable = false` — ключевое свойство: без него клик по HUD отбирает фокус у Destiny 2
- * и персонаж перестаёт слушаться WASD. При скрытом курсоре окно получает `WS_EX_TRANSPARENT`;
- * клавиатурного ввода здесь нет — для него есть консоль.
+ * и персонаж перестаёт слушаться WASD. Клавиатурного ввода здесь нет — для него есть консоль.
  */
 @OptIn(FlowPreview::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -467,20 +459,6 @@ fun HudWindow(state: AppState) {
     // Без выдержки этот дребезг закрывал бы только что открытую страницу истории.
     var pointerOver by remember { mutableStateOf(false) }
     var hovered by remember { mutableStateOf(false) }
-    var systemCursorVisible by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            systemCursorVisible = isSystemCursorVisible()
-            delay(CURSOR_VISIBILITY_POLL_MS)
-        }
-    }
-    LaunchedEffect(systemCursorVisible) {
-        if (!systemCursorVisible) {
-            pointerOver = false
-            hovered = false
-            state.setHudHovered(false)
-        }
-    }
     LaunchedEffect(Unit) {
         snapshotFlow { pointerOver }
             .debounce { over -> if (over) 0L else HOVER_EXIT_DEBOUNCE_MS }
@@ -610,14 +588,6 @@ fun HudWindow(state: AppState) {
         var animating by remember { mutableStateOf(false) }
         var showPill by remember { mutableStateOf(true) }
         var feedRevealed by remember { mutableStateOf(false) }
-
-        // В геймплее системный курсор скрыт — весь HUD становится сквозным для мыши. Как только
-        // меню показывает курсор, возвращаем hit-test, включая hover свернутого призрака.
-        LaunchedEffect(windowPrepared, systemCursorVisible) {
-            if (windowPrepared) {
-                setWindowClickThrough(window, enabled = !systemCursorVisible)
-            }
-        }
 
         // Пока видна пилюля, drag может перенести её на другую половину или другой монитор.
         // Симметричный кожух позволяет сменить направление раскрытия без native setLocation.
