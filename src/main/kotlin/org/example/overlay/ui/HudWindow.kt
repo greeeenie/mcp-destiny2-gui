@@ -181,7 +181,7 @@ private fun AnimatedHudActivityText(label: String) {
     val shimmerCenter = (-0.4f + shimmerProgress * 1.8f) * width
     val shimmerRadius = width * 0.35f
     val brush = Brush.linearGradient(
-        colors = listOf(OverlayColors.TextDim, OverlayColors.Accent, OverlayColors.TextDim),
+        colors = listOf(OverlayColors.TextDim, OverlayColors.Text, OverlayColors.TextDim),
         start = Offset(shimmerCenter - shimmerRadius, 0f),
         end = Offset(shimmerCenter + shimmerRadius, 0f),
     )
