@@ -1,5 +1,17 @@
 package org.example.overlay.app
 
+enum class HudInteractionMode {
+    PASS_THROUGH,
+    EXPANDED_PASS_THROUGH,
+    INTERACTIVE,
+}
+
+internal fun HudInteractionMode.next(): HudInteractionMode = when (this) {
+    HudInteractionMode.PASS_THROUGH -> HudInteractionMode.EXPANDED_PASS_THROUGH
+    HudInteractionMode.EXPANDED_PASS_THROUGH -> HudInteractionMode.INTERACTIVE
+    HudInteractionMode.INTERACTIVE -> HudInteractionMode.PASS_THROUGH
+}
+
 /** Что видит игрок в строке статуса HUD (§5.3). */
 sealed interface OverlayStatus {
     val label: String

@@ -98,7 +98,7 @@ fun VoiceScreen(state: AppState) {
                     if (recordingShortcut) {
                         "Hold the full combination, then release it."
                     } else {
-                        "Click to record a key or combination. Hold it while speaking."
+                        "Click to record a key or combination. Hold to speak; double-tap to control the HUD."
                     },
                 )
             }

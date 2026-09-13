@@ -3,6 +3,7 @@ package org.example.overlay.app
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +42,7 @@ class VoiceRuntime(
     private val tokenProvider: () -> String?,
     private val providerApiKey: (String?) -> String?,
     private val hotkeyEnabled: () -> Boolean,
+    private val onHudDoubleTap: () -> Unit,
     private val onTurnStarted: () -> Unit,
     private val onUserText: (String) -> Unit,
     private val onEvent: (ChatStreamEvent) -> Unit,
@@ -51,10 +53,15 @@ class VoiceRuntime(
     private val turns = VoiceTurnGeneration()
     private var parts: Parts? = null
     private val recorded = ByteArrayOutputStream()
+    private val pressLock = Any()
+    private val doubleTap = DoubleTapDetector(DOUBLE_TAP_GAP_MS)
 
-    @Volatile private var recording = false
+    @Volatile private var capturing = false
+    @Volatile private var voiceRecording = false
     @Volatile private var recordingTurn = 0L
     @Volatile private var turnJob: Job? = null
+    private var pressSequence = 0L
+    private var holdPromotionJob: Job? = null
 
     private val _phase = MutableStateFlow(VoicePhase.IDLE)
     val phase: StateFlow<VoicePhase> = _phase.asStateFlow()
@@ -74,8 +81,8 @@ class VoiceRuntime(
             mixer = AudioDevices.resolve(current.audio.inputMixer, AudioDevices.inputs()),
         )
         val hub = MicrophoneHub(microphone, scope) { chunk ->
-            onMicLevel(if (recording) AudioLevelMeter.level(chunk) else 0f)
-            if (recording) {
+            onMicLevel(if (voiceRecording) AudioLevelMeter.level(chunk) else 0f)
+            if (capturing) {
                 synchronized(recorded) {
                     if (recorded.size() < MAX_RECORDING_BYTES) recorded.write(chunk)
                 }
@@ -91,31 +98,43 @@ class VoiceRuntime(
         hotkey.start(
             onDown = {
                 if (_ready.value && (_phase.value == VoicePhase.IDLE || _phase.value == VoicePhase.ANSWERING)) {
-                    val turn = turns.next()
-                    turnJob?.cancel()
-                    turnJob = null
-                    synchronized(recorded) { recorded.reset() }
-                    recordingTurn = turn
-                    recording = true
-                    if (!turns.runIfCurrent(turn) {
-                            _phase.value = VoicePhase.LISTENING
-                            // LISTENING публикуем первым, чтобы сразу отменить сворачивание.
-                            // Старый ответ остаётся на экране во время записи и заменится только
-                            // после распознавания в onUserText.
-                            onTurnStarted()
+                    synchronized(pressLock) {
+                        pressSequence += 1
+                        val sequence = pressSequence
+                        synchronized(recorded) { recorded.reset() }
+                        capturing = true
+                        voiceRecording = false
+                        recordingTurn = 0L
+                        holdPromotionJob?.cancel()
+                        holdPromotionJob = scope.launch {
+                            delay(TAP_MAX_DURATION_MS)
+                            synchronized(pressLock) {
+                                if (capturing && pressSequence == sequence) promoteHoldToVoiceTurn()
+                            }
                         }
-                    ) {
-                        recording = false
                     }
                 }
             },
             onUp = {
-                if (recording) {
-                    val turn = recordingTurn
-                    recording = false
-                    onMicLevel(0f)
-                    finishTurn(turn)
+                var completedTurn: Long? = null
+                var hudDoubleTap = false
+                synchronized(pressLock) {
+                    if (capturing) {
+                        capturing = false
+                        holdPromotionJob?.cancel()
+                        holdPromotionJob = null
+                        if (voiceRecording) {
+                            voiceRecording = false
+                            completedTurn = recordingTurn
+                        } else {
+                            synchronized(recorded) { recorded.reset() }
+                            hudDoubleTap = doubleTap.registerTap(System.nanoTime())
+                        }
+                    }
                 }
+                onMicLevel(0f)
+                completedTurn?.let(::finishTurn)
+                if (hudDoubleTap) onHudDoubleTap()
             },
         )
 
@@ -129,10 +148,17 @@ class VoiceRuntime(
         turns.invalidate()
         turnJob?.cancel()
         turnJob = null
-        recordingTurn = 0L
+        synchronized(pressLock) {
+            pressSequence += 1
+            recordingTurn = 0L
+            holdPromotionJob?.cancel()
+            holdPromotionJob = null
+            capturing = false
+            voiceRecording = false
+            doubleTap.reset()
+        }
         val active = parts
         parts = null
-        recording = false
         active?.hotkey?.stop()
         active?.hub?.stop()
         onMicLevel(0f)
@@ -193,6 +219,23 @@ class VoiceRuntime(
         }
     }
 
+    private fun promoteHoldToVoiceTurn() {
+        doubleTap.reset()
+        val turn = turns.next()
+        turnJob?.cancel()
+        turnJob = null
+        recordingTurn = turn
+        voiceRecording = true
+        if (!turns.runIfCurrent(turn) {
+                _phase.value = VoicePhase.LISTENING
+                onTurnStarted()
+            }
+        ) {
+            capturing = false
+            voiceRecording = false
+        }
+    }
+
     private class Parts(
         val hub: MicrophoneHub,
         val hotkey: GlobalHotkey,
@@ -202,6 +245,8 @@ class VoiceRuntime(
         /** Формат больше не приходит с сервера: расшифровке важна лишь честная шапка WAV. */
         const val SAMPLE_RATE = 24_000
         const val CHUNK_MS = 100
+        const val TAP_MAX_DURATION_MS = 200L
+        const val DOUBLE_TAP_GAP_MS = 350L
 
         /** Полсекунды — ниже этого запись считается случайным нажатием. */
         const val MIN_RECORDING_BYTES = SAMPLE_RATE * 2 / 2
@@ -209,6 +254,26 @@ class VoiceRuntime(
         /** Полминуты речи: дальше запрос на расшифровку становится неприлично большим. */
         const val MAX_RECORDING_BYTES = SAMPLE_RATE * 2 * 30
         val log = LoggerFactory.getLogger(VoiceRuntime::class.java)
+    }
+}
+
+internal class DoubleTapDetector(private val maxGapMs: Long) {
+    private var firstTapAtNanos: Long? = null
+
+    fun registerTap(nowNanos: Long): Boolean {
+        val previous = firstTapAtNanos
+        val gapNanos = if (previous == null) Long.MAX_VALUE else nowNanos - previous
+        return if (gapNanos in 0..maxGapMs * 1_000_000) {
+            firstTapAtNanos = null
+            true
+        } else {
+            firstTapAtNanos = nowNanos
+            false
+        }
+    }
+
+    fun reset() {
+        firstTapAtNanos = null
     }
 }
 

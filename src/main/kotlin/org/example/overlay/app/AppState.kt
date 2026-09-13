@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.example.overlay.backend.AuthorizationLink
@@ -51,6 +53,9 @@ class AppState(
     private val _hotkeyCaptureActive = MutableStateFlow(false)
     private val _activeToolName = MutableStateFlow<String?>(null)
 
+    private val _hudInteractionMode = MutableStateFlow(HudInteractionMode.PASS_THROUGH)
+    val hudInteractionMode: StateFlow<HudInteractionMode> = _hudInteractionMode.asStateFlow()
+
     /**
      * Голос всегда наготове: микрофон и клавиша поднимаются вместе с приложением, соединения
      * ни с кем не держится — ход уходит на сервер только по отпусканию клавиши.
@@ -62,6 +67,7 @@ class AppState(
         tokenProvider = { _session.value?.token },
         providerApiKey = ::providerApiKey,
         hotkeyEnabled = { !_hotkeyCaptureActive.value },
+        onHudDoubleTap = ::cycleHudInteractionMode,
         onTurnStarted = ::keepHudOpenForListening,
         onUserText = ::replaceHudFeedForNewTurn,
         onEvent = ::onChatEvent,
@@ -132,6 +138,7 @@ class AppState(
     val authPolling: StateFlow<Boolean> = _authPolling.asStateFlow()
 
     private var authPollJob: Job? = null
+    private var hudInteractionTimeoutJob: Job? = null
 
     /** Автообновление: баннер в консоли, бейдж на пилюле, выход перед установкой. */
     val updateState: StateFlow<UpdateState> = updates.state
@@ -282,6 +289,27 @@ class AppState(
             // Уход указателя не меняет страницу: любая из них закрывается одним и тем же
             // отсчётом. Индекс очистится вместе с лентой после двухфазного сворачивания.
             hudHistoryIndexForHover(current, last, hovered)
+        }
+    }
+
+    private fun cycleHudInteractionMode() {
+        val nextMode = synchronized(hudFeedLock) {
+            val next = _hudInteractionMode.value.next()
+            _hudInteractionMode.value = next
+            _hudFeedRevision.value += 1
+            _hudDismissed.value = false
+            next
+        }
+        hudInteractionTimeoutJob?.cancel()
+        hudInteractionTimeoutJob = null
+        if (nextMode != HudInteractionMode.PASS_THROUGH) {
+            hudInteractionTimeoutJob = scope.launch {
+                voice.phase.filter { it == VoicePhase.IDLE }.first()
+                val timeoutMs = settings.value.hud.collapseSeconds
+                    .coerceIn(HudSettings.MIN_COLLAPSE_SECONDS, HudSettings.MAX_COLLAPSE_SECONDS) * 1000L
+                delay(timeoutMs)
+                _hudInteractionMode.value = HudInteractionMode.PASS_THROUGH
+            }
         }
     }
 

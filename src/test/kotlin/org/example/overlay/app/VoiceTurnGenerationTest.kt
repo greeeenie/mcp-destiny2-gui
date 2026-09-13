@@ -7,6 +7,24 @@ import kotlin.test.assertTrue
 
 class VoiceTurnGenerationTest {
     @Test
+    fun `two nearby taps form a double tap`() {
+        val detector = DoubleTapDetector(maxGapMs = 350)
+
+        assertFalse(detector.registerTap(1_000_000_000))
+        assertTrue(detector.registerTap(1_300_000_000))
+        assertFalse(detector.registerTap(1_400_000_000))
+    }
+
+    @Test
+    fun `late second tap starts a new pair`() {
+        val detector = DoubleTapDetector(maxGapMs = 350)
+
+        assertFalse(detector.registerTap(1_000_000_000))
+        assertFalse(detector.registerTap(1_500_000_000))
+        assertTrue(detector.registerTap(1_700_000_000))
+    }
+
+    @Test
     fun `new turn invalidates callbacks from previous turn`() {
         val turns = VoiceTurnGeneration()
         val first = turns.next()

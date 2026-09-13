@@ -76,12 +76,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import org.example.overlay.app.AppState
+import org.example.overlay.app.HudInteractionMode
 import org.example.overlay.app.OverlayStatus
 import org.example.overlay.app.ToolLogEntry
 import org.example.overlay.app.nextHudHistoryIndex
 import org.example.overlay.markdown.AnswerContent
 import org.example.overlay.markdown.MdBlock
 import org.example.overlay.platform.ScreenPlacement
+import org.example.overlay.platform.setWindowClickThrough
 import org.example.overlay.update.UpdateState
 import java.awt.geom.Rectangle2D
 import java.time.Duration
@@ -283,7 +285,8 @@ private const val SYNC_FADE_OUT_DELAY_MS = 200
 /**
  * Оверлей поверх игры (§5.3).
  *
- * В покое HUD остаётся пилюлей с призраком и принимает hover, кнопки и ссылки.
+ * В покое HUD остаётся пилюлей с призраком и пропускает мышь в игру. Двойной тап по PTT
+ * сначала раскрывает панель, второй двойной тап включает hover, кнопки и ссылки.
  *
  * Переход пилюля ↔ полоса устроен так: дорожка уровня, шестерёнка и лента ответа стоят
  * на своих конечных местах у якорного края и только меняют прозрачность вслед за шириной
@@ -314,6 +317,7 @@ fun HudWindow(state: AppState) {
     val voiceMessage by state.voiceMessage.collectAsState()
     val collapseFraction by state.collapseFraction.collectAsState()
     val dismissed by state.hudDismissed.collectAsState()
+    val interactionMode by state.hudInteractionMode.collectAsState()
     val updateState by state.updateState.collectAsState()
     val profile by state.profile.collectAsState()
     val turnHistory by state.turnHistory.collectAsState()
@@ -492,7 +496,8 @@ fun HudWindow(state: AppState) {
     // Раскрываемся без задержки, а сворачивание подтверждаем короткой выдержкой. Статус, feed
     // и dismiss приходят отдельными StateFlow, и без неё их законная перестановка на один кадр
     // запускала обратную анимацию между Answering → Listening и при очистке истории.
-    val expansionRequested = turnActive || (!dismissed && (hovered || hasFeed))
+    val manuallyExpanded = interactionMode != HudInteractionMode.PASS_THROUGH
+    val expansionRequested = turnActive || manuallyExpanded || (!dismissed && (hovered || hasFeed))
     var expanded by remember { mutableStateOf(expansionRequested) }
     LaunchedEffect(expansionRequested) {
         if (expansionRequested) {
@@ -588,6 +593,20 @@ fun HudWindow(state: AppState) {
         var animating by remember { mutableStateOf(false) }
         var showPill by remember { mutableStateOf(true) }
         var feedRevealed by remember { mutableStateOf(false) }
+
+        LaunchedEffect(windowPrepared, interactionMode) {
+            if (windowPrepared) {
+                setWindowClickThrough(window, enabled = interactionMode != HudInteractionMode.INTERACTIVE)
+            }
+        }
+
+        LaunchedEffect(interactionMode) {
+            if (interactionMode != HudInteractionMode.INTERACTIVE) {
+                pointerOver = false
+                hovered = false
+                state.setHudHovered(false)
+            }
+        }
 
         // Пока видна пилюля, drag может перенести её на другую половину или другой монитор.
         // Симметричный кожух позволяет сменить направление раскрытия без native setLocation.

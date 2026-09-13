@@ -9,7 +9,7 @@ plugins {
 group = "org.example.overlay"
 // Единственный источник версии: она же уходит в MSI (packageVersion) и в version.properties,
 // по которому приложение узнаёт себя и сверяется с последним релизом на GitHub.
-version = "1.0.33"
+version = "1.0.34"
 
 kotlin {
     jvmToolchain(21)
