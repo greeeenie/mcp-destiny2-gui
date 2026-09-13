@@ -124,7 +124,9 @@ private fun ProviderModelSelector(
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.width(420.dp),
         )
-        Text(activeProvider.apiKeyHint(), color = OverlayColors.TextDim, fontSize = 11.sp)
+        if (activeProvider == "INWORLD") {
+            Text("Base64-encoded key:secret.", color = OverlayColors.TextDim, fontSize = 11.sp)
+        }
         Button(
             onClick = { onApiKeySave(activeProvider, apiKey) },
             enabled = apiKey.isNotBlank(),
@@ -139,11 +141,6 @@ private fun String.apiKeyLabel(): String = when (this) {
     "INWORLD" -> "Inworld API key"
     "OPEN_ROUTER" -> "OpenRouter API key"
     else -> "API key"
-}
-
-private fun String.apiKeyHint(): String = when (this) {
-    "INWORLD" -> "Base64-encoded key:secret. Stored locally with Windows DPAPI protection."
-    else -> "Stored locally with Windows DPAPI protection."
 }
 
 private fun String.displayName(): String = when (this) {
