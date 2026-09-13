@@ -15,6 +15,8 @@ data class Settings(
     val pttModifierKeyCodes: List<Int> = emptyList(),
     /** Модель ответа из GET /voice/models. `null` — серверная по умолчанию. */
     val chatModel: String? = null,
+    /** Web search is opt-in because some provider plans do not allow it. */
+    val webSearchEnabled: Boolean = false,
     /** Модель распознавания речи оттуда же. `null` — клиентский дефолт [DEFAULT_STT_MODEL]. */
     val sttModel: String? = null,
     val rememberPassword: Boolean = false,

@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -224,12 +225,26 @@ private fun VoiceModelOption.priceLabel(): String? {
  * без поиска модель отвечает из головы и может отстать от патчей.
  */
 @Composable
-internal fun WebSearchIndicator(models: VoiceModels, chatModel: String?) {
+internal fun WebSearchToggle(
+    models: VoiceModels,
+    chatModel: String?,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
     val selectedId = chatModel?.takeIf { id -> models.options.any { it.id == id } } ?: models.default
     val selected = models.options.firstOrNull { it.id == selectedId }
-    if (selected?.webSearch == true) {
-        Text("●  Web search enabled", color = OverlayColors.Ok, fontSize = 11.sp)
-    } else {
-        Text("○  Web search disabled", color = OverlayColors.TextDim, fontSize = 11.sp)
+    val supported = selected?.webSearch == true
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Switch(
+            checked = supported && enabled,
+            onCheckedChange = onEnabledChange,
+            enabled = supported,
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            if (supported) "Web search" else "Web search is unavailable for this model",
+            color = if (supported && enabled) OverlayColors.Ok else OverlayColors.TextDim,
+            fontSize = 11.sp,
+        )
     }
 }

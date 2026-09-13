@@ -126,12 +126,16 @@ class BackendClient(
         token: String,
         text: String,
         model: String?,
+        webSearch: Boolean,
         providerApiKey: String,
         onEvent: (ChatStreamEvent) -> Unit,
     ) {
         require(providerApiKey.isNotBlank()) { "Enter the selected provider API key" }
         val body = mapper.writeValueAsString(
-            mapper.createObjectNode().put("text", text).apply { model?.let { put("model", it) } },
+            mapper.createObjectNode()
+                .put("text", text)
+                .put("webSearch", webSearch)
+                .apply { model?.let { put("model", it) } },
         )
         val request = request("/voice/chat", token, CHAT_TIMEOUT)
             .header("Content-Type", "application/json")

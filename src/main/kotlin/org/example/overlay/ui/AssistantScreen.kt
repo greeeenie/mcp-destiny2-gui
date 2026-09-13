@@ -59,7 +59,12 @@ fun AssistantScreen(state: AppState) {
                     onApiKeySave = state::updateProviderApiKey,
                 )
                 Spacer(Modifier.height(10.dp))
-                WebSearchIndicator(available, settings.chatModel)
+                WebSearchToggle(
+                    models = available,
+                    chatModel = settings.chatModel,
+                    enabled = settings.webSearchEnabled,
+                    onEnabledChange = { enabled -> state.updateSettings { it.copy(webSearchEnabled = enabled) } },
+                )
             }
         }
 

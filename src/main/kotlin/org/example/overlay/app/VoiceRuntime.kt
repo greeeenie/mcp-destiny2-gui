@@ -173,10 +173,11 @@ class VoiceRuntime(
                         _phase.value = VoicePhase.ANSWERING
                     }
                 ) return@launch
-                val model = settings.current.chatModel
+                val currentSettings = settings.current
+                val model = currentSettings.chatModel
                 val apiKey = providerApiKey(model)
                     ?: error("Enter the selected provider API key in the Assistant section")
-                backend.streamChat(token, text, model, apiKey) { event ->
+                backend.streamChat(token, text, model, currentSettings.webSearchEnabled, apiKey) { event ->
                     turns.runIfCurrent(turn) { onEvent(event) }
                 }
             } catch (error: CancellationException) {
