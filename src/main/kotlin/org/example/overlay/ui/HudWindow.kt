@@ -1165,7 +1165,7 @@ private fun ToolLine(entry: ToolLogEntry) {
     // Поиск — особая строка: после ответа игрок видит, что данные пришли из интернета.
     if (entry.isWebSearch) {
         Text(
-            text = "🌐 Answer grounded with web search",
+            text = "Searching web…",
             color = OverlayColors.TextDim,
             fontSize = 11.sp,
             maxLines = 1,
