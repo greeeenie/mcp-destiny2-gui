@@ -59,6 +59,7 @@ fun OverlayStatus.dotColor(): Color = when (this) {
     OverlayStatus.Connecting -> OverlayColors.Warn
     OverlayStatus.Listening -> OverlayColors.Ok
     OverlayStatus.Thinking -> OverlayColors.Accent
+    OverlayStatus.SearchingWeb -> OverlayColors.Accent
     OverlayStatus.Speaking -> OverlayColors.Accent
     OverlayStatus.Answering -> OverlayColors.Accent
     is OverlayStatus.Reconnecting -> OverlayColors.Warn

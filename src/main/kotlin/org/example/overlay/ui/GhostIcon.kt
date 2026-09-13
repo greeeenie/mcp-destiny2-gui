@@ -260,7 +260,7 @@ private fun ghostSpec(status: OverlayStatus): GhostSpec = when (status) {
     )
 
     // Думает: бодрые обороты, скобки-радар кружат — «высматривает».
-    OverlayStatus.Thinking -> GhostSpec(
+    OverlayStatus.Thinking, OverlayStatus.SearchingWeb -> GhostSpec(
         shell = OverlayColors.TextDim, core = OverlayColors.Accent,
         periodSec = 0.8f, glow = 0.65f, center = CenterStyle.Radar,
     )

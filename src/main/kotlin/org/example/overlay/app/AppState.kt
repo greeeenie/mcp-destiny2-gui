@@ -49,6 +49,7 @@ class AppState(
     val providerApiKeys: StateFlow<ProviderApiKeys> = _providerApiKeys.asStateFlow()
 
     private val _hotkeyCaptureActive = MutableStateFlow(false)
+    private val _activeToolName = MutableStateFlow<String?>(null)
 
     /**
      * Голос всегда наготове: микрофон и клавиша поднимаются вместе с приложением, соединения
@@ -65,7 +66,10 @@ class AppState(
         onUserText = ::replaceHudFeedForNewTurn,
         onEvent = ::onChatEvent,
         onMicLevel = { level -> _micLevel.value = level },
-        onError = { message -> _voiceMessage.value = message },
+        onError = { message ->
+            _activeToolName.value = null
+            _voiceMessage.value = message
+        },
     )
 
     val voiceEnabled: StateFlow<Boolean> = voice.ready
@@ -167,7 +171,7 @@ class AppState(
         startVoice()
         updates.start()
         scope.launch {
-            combine(voice.phase, voice.ready, ::resolveStatus).collect { _status.value = it }
+            combine(voice.phase, voice.ready, _activeToolName, ::resolveStatus).collect { _status.value = it }
         }
         scope.launch { runCollapseCountdown() }
         scope.launch { refreshProfilePeriodically() }
@@ -289,6 +293,7 @@ class AppState(
      * уменьшается под пальцем и у игрока остаётся контекст следующего вопроса.
      */
     private fun keepHudOpenForListening() = synchronized(hudFeedLock) {
+        _activeToolName.value = null
         _hudFeedRevision.value += 1
         _collapseFraction.value = null
         _hudDismissed.value = false
@@ -384,24 +389,40 @@ class AppState(
 
     private fun onChatEvent(event: ChatStreamEvent) {
         when (event) {
-            is ChatStreamEvent.Delta -> _assistantTranscript.value = assistantBuffer.accept(event.text, false)
-            is ChatStreamEvent.Done -> if (event.text.isNotBlank()) {
-                _assistantTranscript.value = assistantBuffer.accept(event.text, true)
-                _turnHistory.update { history ->
-                    (history + HudTurn(question = _userTranscript.value, answer = event.text))
-                        .takeLast(MAX_TURN_HISTORY)
+            is ChatStreamEvent.Delta -> {
+                _activeToolName.value = null
+                _assistantTranscript.value = assistantBuffer.accept(event.text, false)
+            }
+            is ChatStreamEvent.Done -> {
+                _activeToolName.value = null
+                if (event.text.isNotBlank()) {
+                    _assistantTranscript.value = assistantBuffer.accept(event.text, true)
+                    _turnHistory.update { history ->
+                        (history + HudTurn(question = _userTranscript.value, answer = event.text))
+                            .takeLast(MAX_TURN_HISTORY)
+                    }
                 }
             }
 
-            is ChatStreamEvent.Tool -> appendToolLog(ToolLogEntry(event.name, event.status, event.durationMs))
-            is ChatStreamEvent.Failed -> _voiceMessage.value = event.message
+            is ChatStreamEvent.Tool -> {
+                if (event.name == ToolLogEntry.WEB_SEARCH) {
+                    _activeToolName.value = event.name.takeIf { event.status == "RUNNING" }
+                } else {
+                    appendToolLog(ToolLogEntry(event.name, event.status, event.durationMs))
+                }
+            }
+            is ChatStreamEvent.Failed -> {
+                _activeToolName.value = null
+                _voiceMessage.value = event.message
+            }
         }
     }
 
-    private fun resolveStatus(phase: VoicePhase, ready: Boolean): OverlayStatus = when {
+    private fun resolveStatus(phase: VoicePhase, ready: Boolean, activeToolName: String?): OverlayStatus = when {
         !ready -> OverlayStatus.Disconnected
         phase == VoicePhase.LISTENING -> OverlayStatus.Listening
         phase == VoicePhase.TRANSCRIBING -> OverlayStatus.Thinking
+        phase == VoicePhase.ANSWERING && activeToolName == ToolLogEntry.WEB_SEARCH -> OverlayStatus.SearchingWeb
         phase == VoicePhase.ANSWERING -> OverlayStatus.Answering
         else -> OverlayStatus.Ready
     }

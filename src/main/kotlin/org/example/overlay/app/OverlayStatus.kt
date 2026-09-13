@@ -25,6 +25,10 @@ sealed interface OverlayStatus {
         override val label = "Thinking"
     }
 
+    data object SearchingWeb : OverlayStatus {
+        override val label = "Searching web"
+    }
+
     data object Speaking : OverlayStatus {
         override val label = "Speaking"
     }

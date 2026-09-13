@@ -111,6 +111,19 @@ private fun formatAgo(then: Instant, now: Instant): String {
     }
 }
 
+internal fun hudActivityText(status: OverlayStatus): String? = when (status) {
+    OverlayStatus.Ready -> null
+    OverlayStatus.Listening -> "Listening..."
+    OverlayStatus.Thinking -> "Thinking..."
+    OverlayStatus.SearchingWeb -> "Searching web..."
+    OverlayStatus.Answering -> "Answering..."
+    OverlayStatus.Speaking -> "Speaking..."
+    OverlayStatus.Connecting -> "Connecting..."
+    is OverlayStatus.Reconnecting -> "${status.label}..."
+    OverlayStatus.Disconnected -> "Disconnected"
+    is OverlayStatus.Failed -> "Error"
+}
+
 private fun quantizeUp(value: Float, step: Float, minimum: Float, maximum: Float): Float =
     (ceil(value / step) * step).coerceIn(minimum, maximum)
 
@@ -382,6 +395,7 @@ fun HudWindow(state: AppState) {
             ?.let { raw -> runCatching { Instant.parse(raw) }.getOrNull() }
             ?.let { syncedAt -> formatAgo(syncedAt, now) }
     }
+    val activityText = hudActivityText(status)
 
     // Наведение с выдержкой на уход. Панель меняет размер прямо под курсором — листание истории,
     // растущий ответ, — и её край проскакивает мимо указателя: Exit тут же сменяется Enter.
@@ -870,7 +884,7 @@ fun HudWindow(state: AppState) {
                     // Давность синхронизации — рядом с иконкой и, как и она, на уровне панели:
                     // внутри ленты блок обрезал бы контейнер прокрутки по высоте шапки.
                     // По вертикали центрируется на ту же ось, что и иконка-призрак.
-                    syncedAgo?.let { ago ->
+                    (activityText ?: syncedAgo)?.let { headerText ->
                         Row(
                             modifier = Modifier
                                 .align(Alignment.TopStart)
@@ -881,10 +895,12 @@ fun HudWindow(state: AppState) {
                                 .graphicsLayer { alpha = syncAlpha },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            SyncIcon(OverlayColors.TextDim, Modifier.size(width = 11.dp, height = 13.dp))
-                            Spacer(Modifier.width(6.dp))
+                            if (activityText == null) {
+                                SyncIcon(OverlayColors.TextDim, Modifier.size(width = 11.dp, height = 13.dp))
+                                Spacer(Modifier.width(6.dp))
+                            }
                             Text(
-                                text = ago,
+                                text = headerText,
                                 color = OverlayColors.TextDim,
                                 fontSize = 11.sp,
                                 maxLines = 1,
